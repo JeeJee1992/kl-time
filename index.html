@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>KL TIME · บัญชีและเงินเดือน · V2.5</title>
+<title>KL TIME · บัญชีและเงินเดือน · V2.6</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--dark2:#374151;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 8px 25px rgba(17,24,39,.08)}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}.muted{color:var(--muted)}.red-t{color:var(--red)}.green-t{color:var(--green)}.amber-t{color:var(--amber)}
@@ -28,6 +28,20 @@
 .personal-grid td{font-variant-numeric:tabular-nums}
 .personal-grid td:nth-child(1),.personal-grid td:nth-child(2){font-weight:700}
 .personal-grid .small{font-size:12px;color:#6b7280}
+.timecard-wrap{overflow-x:auto;border:1px solid #16a34a}
+.timecard{width:100%;min-width:1180px;border-collapse:collapse;table-layout:fixed;background:#fff}
+.timecard th,.timecard td{border:1px solid #16a34a;padding:4px 5px;text-align:center;font-size:12px;height:28px}
+.timecard thead th{background:#dcfce7;color:#111827;font-weight:800}
+.timecard .device-cell{text-align:left;font-weight:800}
+.timecard .date-cell{width:68px}
+.timecard .week-cell{width:58px}
+.timecard .time-cell{width:62px}
+.timecard .late-in{color:#dc2626;font-weight:900}
+.timecard .blank-day{background:#f8fafc}
+.timecard-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 0 10px}
+.timecard-title .employee{font-weight:900;font-size:18px}
+.timecard-title .meta{font-size:12px;color:#6b7280}
+
 .personal-table td{text-align:center;font-variant-numeric:tabular-nums}
 .personal-table td:first-child,.personal-table td:nth-child(2){text-align:left}
 .personal-table .row-present{background:#f0fdf4}
@@ -207,51 +221,87 @@ async function loadPersonalTimesheet(){
     </div>
 
     <div class="notice">
-      ตารางนี้เป็นรายบุคคล และจัดโครงสร้างให้เหมือนบัตรเวลารายคน: Time1 / Time2 / Overtime. ตอนนี้ระบบใช้เวลาเข้าออกหลัก 1 คู่ต่อวัน จึงใส่ข้อมูลไว้ใน Time1 ก่อน ส่วน Time2 และ Overtime จะเว้นว่างถ้ายังไม่มีข้อมูลจริง
+      ตารางรายบุคคลยึดรูปแบบบัตรเวลาเป็นหลัก: วันที่ 1–15 อยู่ฝั่งซ้าย และ 16–31 อยู่ฝั่งขวา · เวลาเข้า/ออกหลักลงใน Time1 · Time2 และ Overtime เว้นว่างเมื่อยังไม่มีข้อมูลจริง
     </div>
 
-    <div class="table-wrap" style="margin-top:10px">
-      <table class="personal-table personal-grid">
+    <div class="timecard-title">
+      <div>
+        <div class="employee">${esc(selected.name)}</div>
+        <div class="meta">${esc(selected.userId)} · ${esc(selected.department||'-')} · ${esc(state.personalMonth)}</div>
+      </div>
+      <div class="meta">Device ID: ${esc(selected.userId)}</div>
+    </div>
+
+    <div class="timecard-wrap" style="margin-top:10px">
+      <table class="timecard">
         <thead>
           <tr>
-            <th rowspan="2">วันที่</th>
-            <th rowspan="2">วัน</th>
+            <th class="device-cell" colspan="2">Device ID: ${esc(selected.userId)}</th>
             <th colspan="2">Time1</th>
             <th colspan="2">Time2</th>
             <th colspan="2">Overtime</th>
-            <th rowspan="2">สถานะ</th>
-            <th rowspan="2">สาย</th>
-            <th rowspan="2">โหมดเข้า</th>
-            <th rowspan="2">โหมดออก</th>
+
+            <th colspan="2"></th>
+            <th colspan="2">Time1</th>
+            <th colspan="2">Time2</th>
+            <th colspan="2">Overtime</th>
           </tr>
           <tr>
-            <th>In</th>
-            <th>Out</th>
-            <th>In</th>
-            <th>Out</th>
-            <th>In</th>
-            <th>Out</th>
+            <th class="date-cell">Date</th>
+            <th class="week-cell">Week</th>
+            <th class="time-cell">In</th>
+            <th class="time-cell">Out</th>
+            <th class="time-cell">In</th>
+            <th class="time-cell">Out</th>
+            <th class="time-cell">In</th>
+            <th class="time-cell">Out</th>
+
+            <th class="date-cell">Date</th>
+            <th class="week-cell">Week</th>
+            <th class="time-cell">In</th>
+            <th class="time-cell">Out</th>
+            <th class="time-cell">In</th>
+            <th class="time-cell">Out</th>
+            <th class="time-cell">In</th>
+            <th class="time-cell">Out</th>
           </tr>
         </thead>
         <tbody>
-          ${(selected.days||[]).map(c=>{
-            const dd=(detail.details||[]).find(x=>x.date===c.date)||{};
-            const ot=Number(otMap[c.date]||0);
-            const status=personalKindLabel(c);
-            return `<tr class="${personalRowClass(c.kind)}">
-              <td><b>${esc(c.date.slice(5))}</b><div class="small">${esc(thaiDateKey(c.date))}</div></td>
-              <td>${esc(thaiWeekday(c.date).slice(0,3) || '')}<div class="small">${esc(thaiWeekday(c.date))}</div></td>
-              <td>${esc(c.in||'')}</td>
-              <td>${esc(c.out||'')}</td>
-              <td></td>
-              <td></td>
-              <td>${ot?esc(c.out||''):''}</td>
-              <td></td>
-              <td><span class="personal-status ${personalStatusClass(c.kind)}">${esc(status||'')}</span></td>
-              <td>${Number(c.late||0)?`${Number(c.late)}`:'0'}</td>
-              <td>${esc(dd.inMode||'')}</td>
-              <td>${esc(dd.outMode||'')}</td>
-            </tr>`;
+          ${Array.from({length:16},(_,i)=>{
+            const leftDay=i+1;
+            const rightDay=i+16;
+            const left=(selected.days||[]).find(x=>Number(x.day)===leftDay);
+            const right=(selected.days||[]).find(x=>Number(x.day)===rightDay);
+
+            const wdShort=(dateKey)=>{
+              if(!dateKey)return '';
+              const n=new Date(dateKey+'T12:00:00+07:00').getDay();
+              return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][n]||'';
+            };
+            const md=(dateKey)=>{
+              if(!dateKey)return '';
+              const p=String(dateKey).split('-');
+              return `${p[1]}-${p[2]}`;
+            };
+            const cell=(c,side)=>{
+              if(!c)return `<td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td>`;
+              const lateCls=Number(c.late||0)>0?'late-in':'';
+              const star=Number(c.late||0)>0?'*':'';
+              return `
+                <td>${esc(md(c.date))}</td>
+                <td>${esc(wdShort(c.date))}</td>
+                <td class="${lateCls}">${esc(c.in||'')}${c.in&&star?star:''}</td>
+                <td>${esc(c.out||'')}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>`;
+            };
+
+            // ฝั่งซ้ายมีวันที่ 1-15 เท่านั้น แถวที่ 16 เว้นว่าง
+            const leftCell=leftDay<=15?cell(left,'L'):cell(null,'L');
+            const rightCell=cell(right,'R');
+            return `<tr>${leftCell}${rightCell}</tr>`;
           }).join('')}
         </tbody>
       </table>
