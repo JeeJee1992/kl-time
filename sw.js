@@ -1,4 +1,4 @@
-const CACHE='kl-time-kiosk-v8-offline-auth-fix';
+const CACHE='kl-time-kiosk-v8-2-face-id-block';
 const FACE_CACHE='kl-time-face-assets-v1';
 const ASSETS=['./','./index.html','./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
