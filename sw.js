@@ -1,4 +1,4 @@
-const CACHE='kl-time-hr-full-v2-2-timesheet-payroll-sync';
+const CACHE='kl-time-hr-full-v2-3-simple-attendance-rule';
 const FACE_CACHE='kl-time-face-assets-v1';
 const ASSETS=['./','./index.html','./fast.html','./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
