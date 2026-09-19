@@ -57,7 +57,26 @@ async function cacheFaceAssets(){if(!navigator.onLine)throw new Error('ต้อ
 function euclid(a,b){let s=0;for(let i=0;i<Math.min(a.length,b.length);i++){const d=Number(a[i])-Number(b[i]);s+=d*d}return Math.sqrt(s)}
 function localFaceMatch(desc,t){if(!t||!Array.isArray(t.descriptors)||!t.descriptors.length)return {status:'review',distance:999};let m=999;for(const r of t.descriptors)m=Math.min(m,euclid(desc,r));return {status:m<=0.60?'pass':'review',distance:m}}
 async function detectFaceSample(video){await loadFaceModels();const opt=new faceapi.TinyFaceDetectorOptions({inputSize:160,scoreThreshold:.45});const r=await faceapi.detectSingleFace(video,opt).withFaceLandmarks().withFaceDescriptor();if(!r)throw new Error('ไม่พบใบหน้าชัดเจน กรุณามองกล้องและให้ใบหน้าอยู่ในกรอบ');const b=r.detection.box;return {descriptor:Array.from(r.descriptor),box:{x:b.x,y:b.y,width:b.width,height:b.height}}}
-async function captureFaceProof(video,template,statusEl){if(statusEl)statusEl.textContent='กำลังสแกนใบหน้า...';const a=await detectFaceSample(video);if(statusEl)statusEl.textContent='ขยับศีรษะเล็กน้อย แล้วมองกล้องต่อ';await new Promise(r=>setTimeout(r,850));const b=await detectFaceSample(video);const dx=Math.abs((b.box.x+b.box.width/2)-(a.box.x+a.box.width/2))/Math.max(1,a.box.width);const dy=Math.abs((b.box.y+b.box.height/2)-(a.box.y+a.box.height/2))/Math.max(1,a.box.height);const ds=Math.abs(b.box.width-a.box.width)/Math.max(1,a.box.width);const movement=Math.max(dx,dy,ds)>=.018?'pass':'review';const match=localFaceMatch(b.descriptor,template);const status=(match.status==='pass'&&movement==='pass')?'pass':'review';return {descriptor:b.descriptor,liveness:movement,clientDistance:Math.round(match.distance*1000)/1000,clientStatus:status,templateVersion:template&&template.version||''}}
+async function captureFaceProof(video,template,statusEl){
+  if(statusEl)statusEl.textContent='กำลังสแกนใบหน้าครั้งที่ 1...';
+  const a=await detectFaceSample(video);
+  const matchA=localFaceMatch(a.descriptor,template);
+  if(matchA.status!=='pass')throw new Error('ใบหน้าไม่ตรงกับพนักงาน กรุณาใช้ใบหน้าของเจ้าของรหัส');
+
+  if(statusEl)statusEl.textContent='ขยับศีรษะเล็กน้อย แล้วมองกล้องต่อ';
+  await new Promise(r=>setTimeout(r,850));
+  const b=await detectFaceSample(video);
+  const matchB=localFaceMatch(b.descriptor,template);
+  if(matchB.status!=='pass')throw new Error('ใบหน้าไม่ตรงกับพนักงาน กรุณาใช้ใบหน้าของเจ้าของรหัส');
+
+  const dx=Math.abs((b.box.x+b.box.width/2)-(a.box.x+a.box.width/2))/Math.max(1,a.box.width);
+  const dy=Math.abs((b.box.y+b.box.height/2)-(a.box.y+a.box.height/2))/Math.max(1,a.box.height);
+  const ds=Math.abs(b.box.width-a.box.width)/Math.max(1,a.box.width);
+  const movement=Math.max(dx,dy,ds)>=.018?'pass':'review';
+  const worst=Math.max(matchA.distance,matchB.distance);
+  const status=movement==='pass'?'pass':'review';
+  return {descriptorA:a.descriptor,descriptor:b.descriptor,liveness:movement,clientDistance:Math.round(worst*1000)/1000,clientStatus:status,templateVersion:template&&template.version||''}
+}
 
 async function offlinePut(x){const d=await idbOpen();return new Promise((resolve,reject)=>{const tx=d.transaction(OFFLINE_STORE,'readwrite');tx.objectStore(OFFLINE_STORE).put(x);tx.oncomplete=()=>{d.close();resolve(x)};tx.onerror=()=>{d.close();reject(tx.error)}})}
 async function offlineDelete(id){const d=await idbOpen();return new Promise((resolve,reject)=>{const tx=d.transaction(OFFLINE_STORE,'readwrite');tx.objectStore(OFFLINE_STORE).delete(id);tx.oncomplete=()=>{d.close();resolve()};tx.onerror=()=>{d.close();reject(tx.error)}})}
