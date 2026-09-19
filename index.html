@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>KL TIME · บัญชีและเงินเดือน · V2.8</title>
+<title>KL TIME · บัญชีและเงินเดือน · V2.9</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--dark2:#374151;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 8px 25px rgba(17,24,39,.08)}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}.muted{color:var(--muted)}.red-t{color:var(--red)}.green-t{color:var(--green)}.amber-t{color:var(--amber)}
@@ -207,6 +207,7 @@ async function loadPersonalTimesheet(){
         <button class="btn" onclick="state.personalMonth=$('#personalMonth').value;state.personalUserId=$('#personalUser').value;loadPersonalTimesheet()">ดูข้อมูล</button>
         <button class="btn secondary" onclick="window.print()">พิมพ์</button>
         <button class="btn secondary" onclick="exportPersonalTimesheetExcel()">Excel</button>
+        <button class="btn secondary" onclick="exportAllEmployeesTimecardExcel()">Excel ทุกคน</button>
       </div>
     </div>
 
@@ -355,16 +356,26 @@ async function loadPersonalTimesheet(){
     </div>
   </div>`;
 }
-async function exportPersonalTimesheetExcel(){
-  const d=window.__personalTimesheet;
-  if(!d)return toast('ยังไม่มีข้อมูลรายบุคคล');
-  if(!window.ExcelJS)return toast('ระบบ Excel ยังโหลดไม่สำเร็จ กรุณาเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่');
 
-  const wb=new ExcelJS.Workbook();
-  wb.creator='KL TIME';
-  wb.created=new Date();
+function safeExcelSheetName_(value,used){
+  let s=String(value||'พนักงาน')
+    .replace(/[\\\/\?\*\[\]\:]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  if(!s)s='พนักงาน';
+  s=s.slice(0,31);
 
-  const ws=wb.addWorksheet('ตารางเวลา',{
+  let base=s,n=2;
+  while(used.has(s)){
+    const suffix='_'+n++;
+    s=base.slice(0,31-suffix.length)+suffix;
+  }
+  used.add(s);
+  return s;
+}
+
+function addEmployeeTimecardSheet_(wb,employee,days,month,sheetName){
+  const ws=wb.addWorksheet(sheetName,{
     pageSetup:{
       orientation:'landscape',
       fitToPage:true,
@@ -374,19 +385,18 @@ async function exportPersonalTimesheetExcel(){
     }
   });
 
-  // ---------- ข้อมูลพนักงานด้านบน ----------
+  // ข้อมูลพนักงานด้านบน
   ws.getCell('A1').value='รหัสพนักงาน';
-  ws.getCell('B1').value=d.employee.userId||'';
+  ws.getCell('B1').value=employee.userId||'';
   ws.getCell('A2').value='ชื่อ';
-  ws.getCell('B2').value=d.employee.name||'';
+  ws.getCell('B2').value=employee.name||'';
   ws.getCell('A3').value='ฝ่าย';
-  ws.getCell('B3').value=d.employee.department||'';
+  ws.getCell('B3').value=employee.department||'';
   ws.getCell('A4').value='เดือน';
-  ws.getCell('B4').value=d.month||'';
-
+  ws.getCell('B4').value=month||'';
   ['A1','A2','A3','A4'].forEach(a=>ws.getCell(a).font={bold:true});
 
-  // ---------- Header แบบเดียวกับบัตรเวลา ----------
+  // Header ตามบัตรเวลาเดิม
   ws.mergeCells('A6:B6');
   ws.mergeCells('C6:D6');
   ws.mergeCells('E6:F6');
@@ -396,7 +406,7 @@ async function exportPersonalTimesheetExcel(){
   ws.mergeCells('M6:N6');
   ws.mergeCells('O6:P6');
 
-  ws.getCell('A6').value=`Device ID: ${d.employee.userId||''}`;
+  ws.getCell('A6').value=`Device ID: ${employee.userId||''}`;
   ws.getCell('C6').value='Time1';
   ws.getCell('E6').value='Time2';
   ws.getCell('G6').value='Overtime';
@@ -481,22 +491,20 @@ async function exportPersonalTimesheetExcel(){
     setStatusCell(row,startCol+2,c);
   };
 
-  // ---------- วันที่ 1-15 ซ้าย / 16-31 ขวา ----------
+  // 1-15 ซ้าย / 16-31 ขวา
   for(let i=0;i<16;i++){
     const row=8+i;
     const leftDay=i+1;
     const rightDay=i+16;
 
-    const left=(d.days||[]).find(x=>Number(x.day)===leftDay);
-    const right=(d.days||[]).find(x=>Number(x.day)===rightDay);
+    const left=(days||[]).find(x=>Number(x.day)===leftDay);
+    const right=(days||[]).find(x=>Number(x.day)===rightDay);
 
     if(leftDay<=15)writeDay(row,1,left);
     writeDay(row,9,right);
   }
 
-  // ---------- รูปแบบ ----------
-  const table=ws.getRange ? null : null; // กัน lint; ExcelJS ไม่มี getRange
-
+  // รูปแบบตาราง
   for(let r=6;r<=23;r++){
     for(let c=1;c<=16;c++){
       const cell=ws.getCell(r,c);
@@ -520,13 +528,11 @@ async function exportPersonalTimesheetExcel(){
   }
   ws.getCell('A6').alignment={horizontal:'left',vertical:'middle'};
 
-  // หัวข้อมูลพนักงาน
   for(let r=1;r<=4;r++){
     ws.getCell(r,1).alignment={horizontal:'left'};
     ws.getCell(r,2).alignment={horizontal:'left'};
   }
 
-  // ความกว้างใกล้ตารางต้นแบบ
   const widths=[10,9,9,9,9,9,9,9,10,9,9,9,9,9,9,9];
   widths.forEach((w,i)=>ws.getColumn(i+1).width=w);
   ws.getRow(6).height=22;
@@ -534,8 +540,10 @@ async function exportPersonalTimesheetExcel(){
   for(let r=8;r<=23;r++)ws.getRow(r).height=21;
 
   ws.views=[{state:'frozen',ySplit:7}];
+  return ws;
+}
 
-  // ---------- ดาวน์โหลด .xlsx ----------
+async function downloadExcelWorkbook_(wb,filename){
   const buffer=await wb.xlsx.writeBuffer();
   const blob=new Blob(
     [buffer],
@@ -544,12 +552,72 @@ async function exportPersonalTimesheetExcel(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;
-  a.download=`KL_TIME_${d.employee.userId}_${d.month}.xlsx`;
+  a.download=filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+async function exportPersonalTimesheetExcel(){
+  const d=window.__personalTimesheet;
+  if(!d)return toast('ยังไม่มีข้อมูลรายบุคคล');
+  if(!window.ExcelJS)return toast('ระบบ Excel ยังโหลดไม่สำเร็จ กรุณาเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่');
+
+  const wb=new ExcelJS.Workbook();
+  wb.creator='KL TIME';
+  wb.created=new Date();
+
+  addEmployeeTimecardSheet_(
+    wb,
+    d.employee,
+    d.days||[],
+    d.month,
+    'ตารางเวลา'
+  );
+
+  await downloadExcelWorkbook_(wb,`KL_TIME_${d.employee.userId}_${d.month}.xlsx`);
   toast('ดาวน์โหลด Excel แล้ว');
+}
+
+async function exportAllEmployeesTimecardExcel(){
+  if(!window.ExcelJS)return toast('ระบบ Excel ยังโหลดไม่สำเร็จ กรุณาเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่');
+
+  const month=($('#personalMonth')&&$('#personalMonth').value)||state.personalMonth;
+  if(!month)return toast('กรุณาเลือกเดือน');
+
+  try{
+    const d=await api('getTimesheetMonth',state.token,month);
+    const rows=d.rows||[];
+
+    if(!rows.length)return toast('ยังไม่มีพนักงานในเดือนนี้');
+
+    const wb=new ExcelJS.Workbook();
+    wb.creator='KL TIME';
+    wb.created=new Date();
+
+    const used=new Set();
+
+    rows.forEach(emp=>{
+      const sheetName=safeExcelSheetName_(
+        `${emp.userId||''} ${emp.name||''}`.trim(),
+        used
+      );
+
+      addEmployeeTimecardSheet_(
+        wb,
+        emp,
+        emp.days||[],
+        d.month||month,
+        sheetName
+      );
+    });
+
+    await downloadExcelWorkbook_(wb,`KL_TIME_พนักงานทุกคน_${d.month||month}.xlsx`);
+    toast(`ดาวน์โหลดพนักงานทั้งหมด ${rows.length} คนแล้ว`);
+  }catch(e){
+    err(e);
+  }
 }
 
 function periodDates(){const [y,m]=state.payMonth.split('-').map(Number),last=new Date(y,m,0).getDate();if(state.payPeriod==='1')return {from:`${state.payMonth}-01`,to:`${state.payMonth}-15`};if(state.payPeriod==='2')return {from:`${state.payMonth}-16`,to:`${state.payMonth}-${String(last).padStart(2,'0')}`};return {from:`${state.payMonth}-01`,to:`${state.payMonth}-${String(last).padStart(2,'0')}`}}
