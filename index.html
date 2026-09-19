@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>KL TIME · บัญชีและเงินเดือน · V2.7</title>
+<title>KL TIME · บัญชีและเงินเดือน · V2.8</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--dark2:#374151;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 8px 25px rgba(17,24,39,.08)}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}.muted{color:var(--muted)}.red-t{color:var(--red)}.green-t{color:var(--green)}.amber-t{color:var(--amber)}
@@ -76,6 +76,7 @@
 <div id="app"></div>
 <div id="loader" class="loader"><div class="spin"></div></div>
 <script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script>
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
@@ -205,7 +206,7 @@ async function loadPersonalTimesheet(){
         <select id="personalUser" style="min-width:250px">${options}</select>
         <button class="btn" onclick="state.personalMonth=$('#personalMonth').value;state.personalUserId=$('#personalUser').value;loadPersonalTimesheet()">ดูข้อมูล</button>
         <button class="btn secondary" onclick="window.print()">พิมพ์</button>
-        <button class="btn secondary" onclick="exportPersonalTimesheetCsv()">Excel/CSV</button>
+        <button class="btn secondary" onclick="exportPersonalTimesheetExcel()">Excel</button>
       </div>
     </div>
 
@@ -354,38 +355,201 @@ async function loadPersonalTimesheet(){
     </div>
   </div>`;
 }
-function exportPersonalTimesheetCsv(){
+async function exportPersonalTimesheetExcel(){
   const d=window.__personalTimesheet;
   if(!d)return toast('ยังไม่มีข้อมูลรายบุคคล');
+  if(!window.ExcelJS)return toast('ระบบ Excel ยังโหลดไม่สำเร็จ กรุณาเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่');
 
-  const details={};
-  (d.detail.details||[]).forEach(x=>details[x.date]=x);
+  const wb=new ExcelJS.Workbook();
+  wb.creator='KL TIME';
+  wb.created=new Date();
 
-  const rows=[
-    ['รหัสพนักงาน',d.employee.userId],
-    ['ชื่อ',d.employee.name],
-    ['ฝ่าย',d.employee.department||''],
-    ['เดือน',d.month],
-    [],
-    ['วันที่','วัน','เวลาเข้า','เวลาออก','OT(ชม.)','สถานะ','สาย(นาที)','โหมดเข้า','โหมดออก']
-  ];
-
-  (d.days||[]).forEach(c=>{
-    const dd=details[c.date]||{};
-    rows.push([
-      thaiDateKey(c.date),
-      thaiWeekday(c.date),
-      c.in||'',
-      c.out||'',
-      Number(d.otMap[c.date]||0),
-      personalKindLabel(c),
-      Number(c.late||0),
-      dd.inMode||'',
-      dd.outMode||''
-    ]);
+  const ws=wb.addWorksheet('ตารางเวลา',{
+    pageSetup:{
+      orientation:'landscape',
+      fitToPage:true,
+      fitToWidth:1,
+      fitToHeight:1,
+      margins:{left:0.25,right:0.25,top:0.35,bottom:0.35,header:0.1,footer:0.1}
+    }
   });
 
-  exportCsv(`KL_TIME_${d.employee.userId}_${d.month}.csv`,rows);
+  // ---------- ข้อมูลพนักงานด้านบน ----------
+  ws.getCell('A1').value='รหัสพนักงาน';
+  ws.getCell('B1').value=d.employee.userId||'';
+  ws.getCell('A2').value='ชื่อ';
+  ws.getCell('B2').value=d.employee.name||'';
+  ws.getCell('A3').value='ฝ่าย';
+  ws.getCell('B3').value=d.employee.department||'';
+  ws.getCell('A4').value='เดือน';
+  ws.getCell('B4').value=d.month||'';
+
+  ['A1','A2','A3','A4'].forEach(a=>ws.getCell(a).font={bold:true});
+
+  // ---------- Header แบบเดียวกับบัตรเวลา ----------
+  ws.mergeCells('A6:B6');
+  ws.mergeCells('C6:D6');
+  ws.mergeCells('E6:F6');
+  ws.mergeCells('G6:H6');
+  ws.mergeCells('I6:J6');
+  ws.mergeCells('K6:L6');
+  ws.mergeCells('M6:N6');
+  ws.mergeCells('O6:P6');
+
+  ws.getCell('A6').value=`Device ID: ${d.employee.userId||''}`;
+  ws.getCell('C6').value='Time1';
+  ws.getCell('E6').value='Time2';
+  ws.getCell('G6').value='Overtime';
+  ws.getCell('K6').value='Time1';
+  ws.getCell('M6').value='Time2';
+  ws.getCell('O6').value='Overtime';
+
+  const subHeaders=['Date','Week','In','Out','In','Out','In','Out','Date','Week','In','Out','In','Out','In','Out'];
+  subHeaders.forEach((v,i)=>ws.getCell(7,i+1).value=v);
+
+  const wdShort=(dateKey)=>{
+    if(!dateKey)return '';
+    const n=new Date(dateKey+'T12:00:00+07:00').getDay();
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][n]||'';
+  };
+  const md=(dateKey)=>{
+    if(!dateKey)return '';
+    const p=String(dateKey).split('-');
+    return `${p[1]}-${p[2]}`;
+  };
+  const statusText=(c)=>{
+    if(!c)return '';
+    if(c.kind==='absent')return 'ขาด';
+    if(c.kind==='leave')return String(c.label||'ลา').replace(/^ลา\s*·?\s*/,'ลา ');
+    if(c.kind==='holiday')return String(c.label||'วันหยุดประเพณี').replace(/^วันหยุด\s*·\s*/,'');
+    if(c.kind==='off')return 'วันหยุดประจำ';
+    return '';
+  };
+
+  const GREEN='FF16A34A';
+  const HEADER_FILL='FFDCFCE7';
+  const ABSENT_FILL='FFFFF1F2';
+  const LEAVE_FILL='FFF5F3FF';
+  const HOLIDAY_FILL='FFEFF6FF';
+  const OFF_FILL='FFF3F4F6';
+  const RED='FFDC2626';
+  const PURPLE='FF6D28D9';
+  const BLUE='FF0369A1';
+  const GRAY='FF4B5563';
+
+  const setStatusCell=(row,col,c)=>{
+    const text=statusText(c);
+    if(!text)return;
+
+    ws.mergeCells(row,col,row,col+1);
+    const cell=ws.getCell(row,col);
+    cell.value=text;
+    cell.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+    cell.font={bold:true};
+
+    if(c.kind==='absent'){
+      cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:ABSENT_FILL}};
+      cell.font={bold:true,color:{argb:RED}};
+    }else if(c.kind==='leave'){
+      cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:LEAVE_FILL}};
+      cell.font={bold:true,color:{argb:PURPLE}};
+    }else if(c.kind==='holiday'){
+      cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:HOLIDAY_FILL}};
+      cell.font={bold:true,color:{argb:BLUE}};
+    }else if(c.kind==='off'){
+      cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:OFF_FILL}};
+      cell.font={bold:true,color:{argb:GRAY}};
+    }
+  };
+
+  const writeDay=(row,startCol,c)=>{
+    if(!c)return;
+
+    ws.getCell(row,startCol).value=md(c.date);
+    ws.getCell(row,startCol+1).value=wdShort(c.date);
+
+    if(c.in){
+      ws.getCell(row,startCol+2).value=String(c.in)+(Number(c.late||0)>0?'*':'');
+      ws.getCell(row,startCol+3).value=c.out||'';
+
+      if(Number(c.late||0)>0){
+        ws.getCell(row,startCol+2).font={bold:true,color:{argb:RED}};
+      }
+      return;
+    }
+
+    setStatusCell(row,startCol+2,c);
+  };
+
+  // ---------- วันที่ 1-15 ซ้าย / 16-31 ขวา ----------
+  for(let i=0;i<16;i++){
+    const row=8+i;
+    const leftDay=i+1;
+    const rightDay=i+16;
+
+    const left=(d.days||[]).find(x=>Number(x.day)===leftDay);
+    const right=(d.days||[]).find(x=>Number(x.day)===rightDay);
+
+    if(leftDay<=15)writeDay(row,1,left);
+    writeDay(row,9,right);
+  }
+
+  // ---------- รูปแบบ ----------
+  const table=ws.getRange ? null : null; // กัน lint; ExcelJS ไม่มี getRange
+
+  for(let r=6;r<=23;r++){
+    for(let c=1;c<=16;c++){
+      const cell=ws.getCell(r,c);
+      cell.border={
+        top:{style:'thin',color:{argb:GREEN}},
+        left:{style:'thin',color:{argb:GREEN}},
+        bottom:{style:'thin',color:{argb:GREEN}},
+        right:{style:'thin',color:{argb:GREEN}}
+      };
+      if(!cell.alignment)cell.alignment={horizontal:'center',vertical:'middle'};
+    }
+  }
+
+  for(let r=6;r<=7;r++){
+    for(let c=1;c<=16;c++){
+      const cell=ws.getCell(r,c);
+      cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:HEADER_FILL}};
+      cell.font={bold:true,color:{argb:'FF111827'}};
+      cell.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+    }
+  }
+  ws.getCell('A6').alignment={horizontal:'left',vertical:'middle'};
+
+  // หัวข้อมูลพนักงาน
+  for(let r=1;r<=4;r++){
+    ws.getCell(r,1).alignment={horizontal:'left'};
+    ws.getCell(r,2).alignment={horizontal:'left'};
+  }
+
+  // ความกว้างใกล้ตารางต้นแบบ
+  const widths=[10,9,9,9,9,9,9,9,10,9,9,9,9,9,9,9];
+  widths.forEach((w,i)=>ws.getColumn(i+1).width=w);
+  ws.getRow(6).height=22;
+  ws.getRow(7).height=22;
+  for(let r=8;r<=23;r++)ws.getRow(r).height=21;
+
+  ws.views=[{state:'frozen',ySplit:7}];
+
+  // ---------- ดาวน์โหลด .xlsx ----------
+  const buffer=await wb.xlsx.writeBuffer();
+  const blob=new Blob(
+    [buffer],
+    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+  );
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`KL_TIME_${d.employee.userId}_${d.month}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  toast('ดาวน์โหลด Excel แล้ว');
 }
 
 function periodDates(){const [y,m]=state.payMonth.split('-').map(Number),last=new Date(y,m,0).getDate();if(state.payPeriod==='1')return {from:`${state.payMonth}-01`,to:`${state.payMonth}-15`};if(state.payPeriod==='2')return {from:`${state.payMonth}-16`,to:`${state.payMonth}-${String(last).padStart(2,'0')}`};return {from:`${state.payMonth}-01`,to:`${state.payMonth}-${String(last).padStart(2,'0')}`}}
