@@ -106,11 +106,11 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 const DEVICE_KEY='kl_kiosk_device_v4';
-const CRED_KEY='kl_kiosk_offline_credentials_v4';
-const STATUS_KEY='kl_fast_kiosk_status_v1';
+const CRED_KEY='kl_kiosk_offline_credentials_dept_v1';
+const STATUS_KEY='kl_fast_kiosk_status_dept_v1';
 const QUEUE_DB='kl_time_offline_v2';
-const QUEUE_STORE='attendance_queue';
-const FACE_STORE='face_templates';
+const QUEUE_STORE='attendance_queue_dept_v1';
+const FACE_STORE='face_templates_dept_v1';
 const FACE_DB='kl_time_offline_v2';
 const FACE_MODEL_BASE='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
 const FACE_ASSETS=[
@@ -181,7 +181,7 @@ function statusMap(){try{return JSON.parse(localStorage.getItem(STATUS_KEY)||'{}
 function saveHome(uid,home){const m=statusMap();m[String(uid).toUpperCase()]={home,savedAt:new Date().toISOString()};localStorage.setItem(STATUS_KEY,JSON.stringify(m))}
 function getHome(uid){const x=statusMap()[String(uid).toUpperCase()];return x&&x.home||null}
 
-function idbOpen(){return new Promise((resolve,reject)=>{const q=indexedDB.open(FACE_DB,2);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains(QUEUE_STORE)){const s=d.createObjectStore(QUEUE_STORE,{keyPath:'eventId'});s.createIndex('userId','userId',{unique:false})}if(!d.objectStoreNames.contains(FACE_STORE))d.createObjectStore(FACE_STORE,{keyPath:'userId'})};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
+function idbOpen(){return new Promise((resolve,reject)=>{const q=indexedDB.open(FACE_DB,3);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains(QUEUE_STORE)){const s=d.createObjectStore(QUEUE_STORE,{keyPath:'eventId'});s.createIndex('userId','userId',{unique:false})}if(!d.objectStoreNames.contains(FACE_STORE))d.createObjectStore(FACE_STORE,{keyPath:'userId'})};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
 async function facePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(FACE_STORE,'readwrite');tx.objectStore(FACE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
 async function faceAll(){const d=await idbOpen();return new Promise((res,rej)=>{const r=d.transaction(FACE_STORE,'readonly').objectStore(FACE_STORE).getAll();r.onsuccess=()=>{const x=r.result||[];d.close();res(x)};r.onerror=()=>{d.close();rej(r.error)}})}
 async function queuePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(QUEUE_STORE,'readwrite');tx.objectStore(QUEUE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
