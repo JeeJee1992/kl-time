@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>KL TIME · บัญชีและเงินเดือน · V2.6</title>
+<title>KL TIME · บัญชีและเงินเดือน · V2.7</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--dark2:#374151;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 8px 25px rgba(17,24,39,.08)}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}.muted{color:var(--muted)}.red-t{color:var(--red)}.green-t{color:var(--green)}.amber-t{color:var(--amber)}
@@ -38,6 +38,12 @@
 .timecard .time-cell{width:62px}
 .timecard .late-in{color:#dc2626;font-weight:900}
 .timecard .blank-day{background:#f8fafc}
+.timecard .status-absent{background:#fff1f2;color:#dc2626;font-weight:900}
+.timecard .status-leave{background:#f5f3ff;color:#6d28d9;font-weight:800}
+.timecard .status-holiday{background:#eff6ff;color:#0369a1;font-weight:800}
+.timecard .status-off{background:#f3f4f6;color:#4b5563;font-weight:800}
+.timecard .status-text{white-space:normal;line-height:1.2;font-size:11px}
+
 .timecard-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 0 10px}
 .timecard-title .employee{font-weight:900;font-size:18px}
 .timecard-title .meta{font-size:12px;color:#6b7280}
@@ -221,7 +227,7 @@ async function loadPersonalTimesheet(){
     </div>
 
     <div class="notice">
-      ตารางรายบุคคลยึดรูปแบบบัตรเวลาเป็นหลัก: วันที่ 1–15 อยู่ฝั่งซ้าย และ 16–31 อยู่ฝั่งขวา · เวลาเข้า/ออกหลักลงใน Time1 · Time2 และ Overtime เว้นว่างเมื่อยังไม่มีข้อมูลจริง
+      ตารางรายบุคคลยึดรูปแบบบัตรเวลาเป็นหลัก: มีสแกนจะแสดงเวลาเข้า/ออกจริงใน Time1 · ไม่มีสแกนจะแสดง ขาด / ลา / วันหยุดประจำ / วันหยุดประเพณี ตามข้อมูลจริง · Time2 และ Overtime เว้นว่างเมื่อยังไม่มีข้อมูลจริง
     </div>
 
     <div class="timecard-title">
@@ -285,13 +291,53 @@ async function loadPersonalTimesheet(){
             };
             const cell=(c,side)=>{
               if(!c)return `<td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td><td class="blank-day"></td>`;
-              const lateCls=Number(c.late||0)>0?'late-in':'';
-              const star=Number(c.late||0)>0?'*':'';
+
+              // ถ้ามีเวลาเข้า ให้ข้อมูลสแกนจริงชนะสถานะอื่นเสมอ
+              if(c.in){
+                const lateCls=Number(c.late||0)>0?'late-in':'';
+                const star=Number(c.late||0)>0?'*':'';
+                return `
+                  <td>${esc(md(c.date))}</td>
+                  <td>${esc(wdShort(c.date))}</td>
+                  <td class="${lateCls}">${esc(c.in||'')}${star}</td>
+                  <td>${esc(c.out||'')}</td>
+                  <td></td>
+                  <td></td>
+                  <td></td>
+                  <td></td>`;
+              }
+
+              // ไม่มีสแกน: แสดงสถานะใน Time1 โดยไม่เพิ่มคอลัมน์ใหม่
+              let text='',cls='';
+              if(c.kind==='absent'){
+                text='ขาด'; cls='status-absent';
+              }else if(c.kind==='leave'){
+                text=String(c.label||'ลา').replace(/^ลา\s*·?\s*/,'ลา ');
+                cls='status-leave';
+              }else if(c.kind==='holiday'){
+                text=String(c.label||'วันหยุดประเพณี').replace(/^วันหยุด\s*·\s*/,'');
+                cls='status-holiday';
+              }else if(c.kind==='off'){
+                text='วันหยุดประจำ'; cls='status-off';
+              }
+
+              if(text){
+                return `
+                  <td>${esc(md(c.date))}</td>
+                  <td>${esc(wdShort(c.date))}</td>
+                  <td colspan="2" class="${cls} status-text">${esc(text)}</td>
+                  <td></td>
+                  <td></td>
+                  <td></td>
+                  <td></td>`;
+              }
+
+              // วันอนาคตหรือยังไม่มีสถานะ
               return `
                 <td>${esc(md(c.date))}</td>
                 <td>${esc(wdShort(c.date))}</td>
-                <td class="${lateCls}">${esc(c.in||'')}${c.in&&star?star:''}</td>
-                <td>${esc(c.out||'')}</td>
+                <td></td>
+                <td></td>
                 <td></td>
                 <td></td>
                 <td></td>
