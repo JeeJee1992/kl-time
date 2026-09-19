@@ -118,6 +118,55 @@ async function queueOfflineAttendance(ev){const rows=await offlineForUser(ev.use
 async function syncOfflineQueue(showMessage=true){if(state.syncing||!navigator.onLine||!state.token||!state.user||state.user.role!=='employee')return;state.syncing=true;let synced=0,failed=0;try{const rows=await offlineForUser(state.user.userId);for(const ev of rows){if(ev.failed){failed++;continue}try{const r=await api('syncOfflineAttendance',state.token,ev);await offlineDelete(ev.eventId);synced++;if(r&&r.home){state.home=r.home;saveSnapshot(r.home)}}catch(e){if(networkError(e))break;if((e.message||'').includes('เซสชัน')){toast('ต้องออนไลน์และเข้าสู่ระบบใหม่ก่อนซิงก์รายการออฟไลน์');break}if(permanentOfflineError(e)){ev.failed=true;ev.syncError=e.message||String(e);ev.failedAt=new Date().toISOString();await offlinePut(ev);failed++;continue}throw e}}if(showMessage&&synced)toast(`ซิงก์ข้อมูลออฟไลน์สำเร็จ ${synced} รายการ`);if(state.user&&state.user.role==='employee')await renderEmployee()}catch(e){err(e)}finally{state.syncing=false}}
 async function showOfflineQueue(){if(!state.user)return;const rows=await offlineForUser(state.user.userId);openModal(`<div class="section-head"><h2>รายการออฟไลน์ในเครื่อง</h2><button class="btn secondary" onclick="closeModal()">ปิด</button></div>${rows.length?rows.map(x=>`<div class="offline-row ${x.failed?'offline-failed':''}"><div><b>${x.type==='in'?'เข้างาน':'ออกงาน'} ${esc(hmLocal(x.clientCapturedAt))}</b><div class="tiny">${esc(x.localDate)} · GPS ${Math.round(x.accuracy)} ม. ${x.failed?'<br>ซิงก์ไม่ผ่าน: '+esc(x.syncError||''):''}</div></div><span class="badge ${x.failed?'red':'amber'}">${x.failed?'ต้องตรวจ':'รอซิงก์'}</span></div>`).join(''):'<div class="muted">ไม่มีรายการค้างในเครื่อง</div>'}<button class="btn full" style="margin-top:12px" ${!navigator.onLine?'disabled':''} onclick="closeModal();syncOfflineQueue(true)">ซิงก์ตอนนี้</button>`)}
 function netLabel(){return navigator.onLine?'ออนไลน์':'ออฟไลน์'}
+
+const GPS_WARM_MAX_AGE_MS=30000;
+let __klGpsWatchId=null;
+let __klWarmLoc=null;
+
+function gpsLocFresh(loc){
+  return !!(loc && Number.isFinite(Number(loc.lat)) && Number.isFinite(Number(loc.lng)) &&
+    Number(loc.accuracy)<=100 && (Date.now()-Number(loc.at||0))<=GPS_WARM_MAX_AGE_MS);
+}
+
+function acceptWarmGps(p){
+  const loc={
+    lat:Number(p.coords.latitude),
+    lng:Number(p.coords.longitude),
+    accuracy:Number(p.coords.accuracy),
+    at:Date.now()
+  };
+  __klWarmLoc=loc;
+
+  if(state.kioskCtx && Number(loc.accuracy)<=100){
+    window.__klLoc={lat:loc.lat,lng:loc.lng,accuracy:loc.accuracy};
+    state.kioskCtx.gpsReady=true;
+    refreshKioskReady();
+  }
+}
+
+function startGpsWarmup(){
+  if(!navigator.geolocation || __klGpsWatchId!==null)return;
+  try{
+    __klGpsWatchId=navigator.geolocation.watchPosition(
+      acceptWarmGps,
+      ()=>{},
+      {enableHighAccuracy:true,maximumAge:30000,timeout:10000}
+    );
+  }catch(e){}
+}
+
+function useWarmGpsForPunch(){
+  if(!state.kioskCtx)return false;
+  if(!gpsLocFresh(__klWarmLoc))return false;
+  window.__klLoc={
+    lat:__klWarmLoc.lat,
+    lng:__klWarmLoc.lng,
+    accuracy:__klWarmLoc.accuracy
+  };
+  state.kioskCtx.gpsReady=true;
+  refreshKioskReady();
+  return true;
+}
 window.addEventListener('online',()=>{toast('อินเทอร์เน็ตกลับมาแล้ว · กำลังซิงก์รายการ');syncServerClock();syncKioskQueue(true);if(!state.user)renderKiosk()});
 window.addEventListener('offline',()=>{toast('ออฟไลน์ — ยังลงเวลาได้ถ้าเคยยืนยันพนักงานบนเครื่องนี้');if(!state.user)renderKiosk()});
 
@@ -141,11 +190,11 @@ function lockNowIso(){return new Date(navigator.onLine?serverNowMs():Date.now())
 async function syncServerClock(){if(!navigator.onLine)return false;try{const r=await api('ping');if(r&&r.serverEpochMs){state.serverAnchorEpoch=Number(r.serverEpochMs);state.serverAnchorPerf=performance.now()}if(r&&r.settings)state.settings=r.settings;return true}catch(e){return false}}
 function kioskTimeText(iso){const d=new Date(iso);return d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}
 async function kioskQueueCount(){return (await offlineAll()).filter(x=>x.kiosk&&!x.failed).length}
-async function renderKiosk(){state.user=null;clearInterval(window.__clock);const q=await kioskQueueCount();$('#app').innerHTML=`<div class="kiosk-wrap"><div class="kiosk-head"><div class="logo" style="margin:0 auto">KL</div><h1>KL TIME</h1><div class="muted">ระบบลงเวลาพนักงาน</div></div>${!navigator.onLine?`<div class="offline-banner"><b>ออฟไลน์</b> — ใช้ได้กับพนักงานที่เคยยืนยันออนไลน์บนเครื่องนี้ภายใน 24 ชั่วโมง</div>`:''}<div class="kiosk-card"><div style="display:flex;justify-content:space-between;align-items:center"><span class="net-pill ${navigator.onLine?'':'offline'}">${navigator.onLine?'● ออนไลน์':'● ออฟไลน์'}</span>${q?`<button class="queue-chip" onclick="showKioskQueue()">รอซิงก์ ${q}</button>`:''}</div><div id="kioskClock" class="kiosk-clock">--:--:--</div><div class="kiosk-date">${new Date().toLocaleDateString('th-TH',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div><div class="field"><label>รหัสพนักงาน</label><input id="kUid" autocomplete="off" autocapitalize="characters" placeholder="เช่น KL001"></div><div class="field"><label>PIN</label><input id="kPin" type="password" inputmode="numeric" autocomplete="off" placeholder="••••"></div><div class="kiosk-actions"><button class="btn green" onclick="startKioskPunch('in')">เข้างาน IN</button><button class="btn red" onclick="startKioskPunch('out')">ออกงาน OUT</button></div><div class="notice" style="margin-top:14px"><b>เวลาถูกล็อกทันทีที่กด IN/OUT</b><br>ความช้าของกล้อง GPS การอัปโหลดรูป หรือ Google Sheet จะไม่เลื่อนเวลาที่กดลงงาน</div><div class="kiosk-foot"><span class="tiny">เครื่อง: ${esc(kioskDeviceId().slice(-10))}</span><button class="admin-link" onclick="showAdminLogin()">หลังบ้าน / บัญชี</button></div></div></div>`;const tick=()=>{const e=$('#kioskClock');if(e)e.textContent=new Date(serverNowMs()).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})};tick();window.__clock=setInterval(tick,1000);setTimeout(()=>loadFaceModels(true).catch(()=>{}),150)}
+async function renderKiosk(){state.user=null;clearInterval(window.__clock);const q=await kioskQueueCount();$('#app').innerHTML=`<div class="kiosk-wrap"><div class="kiosk-head"><div class="logo" style="margin:0 auto">KL</div><h1>KL TIME</h1><div class="muted">ระบบลงเวลาพนักงาน</div></div>${!navigator.onLine?`<div class="offline-banner"><b>ออฟไลน์</b> — ใช้ได้กับพนักงานที่เคยยืนยันออนไลน์บนเครื่องนี้ภายใน 24 ชั่วโมง</div>`:''}<div class="kiosk-card"><div style="display:flex;justify-content:space-between;align-items:center"><span class="net-pill ${navigator.onLine?'':'offline'}">${navigator.onLine?'● ออนไลน์':'● ออฟไลน์'}</span>${q?`<button class="queue-chip" onclick="showKioskQueue()">รอซิงก์ ${q}</button>`:''}</div><div id="kioskClock" class="kiosk-clock">--:--:--</div><div class="kiosk-date">${new Date().toLocaleDateString('th-TH',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div><div class="field"><label>รหัสพนักงาน</label><input id="kUid" autocomplete="off" autocapitalize="characters" placeholder="เช่น KL001"></div><div class="field"><label>PIN</label><input id="kPin" type="password" inputmode="numeric" autocomplete="off" placeholder="••••"></div><div class="kiosk-actions"><button class="btn green" onclick="startKioskPunch('in')">เข้างาน IN</button><button class="btn red" onclick="startKioskPunch('out')">ออกงาน OUT</button></div><div class="notice" style="margin-top:14px"><b>เวลาถูกล็อกทันทีที่กด IN/OUT</b><br>ความช้าของกล้อง GPS การอัปโหลดรูป หรือ Google Sheet จะไม่เลื่อนเวลาที่กดลงงาน</div><div class="kiosk-foot"><span class="tiny">เครื่อง: ${esc(kioskDeviceId().slice(-10))}</span><button class="admin-link" onclick="showAdminLogin()">หลังบ้าน / บัญชี</button></div></div></div>`;const tick=()=>{const e=$('#kioskClock');if(e)e.textContent=new Date(serverNowMs()).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})};tick();window.__clock=setInterval(tick,1000);startGpsWarmup();setTimeout(()=>loadFaceModels(true).catch(()=>{}),150)}
 function showAdminLogin(){openModal(`<div class="section-head"><h2>เข้าสู่หลังบ้าน</h2><button class="btn secondary" onclick="closeModal()">ปิด</button></div><div class="field"><label>รหัสผู้ดูแล</label><input id="adminUid" autocomplete="username"></div><div class="field"><label>PIN</label><input id="adminPin" type="password" inputmode="numeric"></div><button class="btn full" onclick="adminLogin()">เข้าสู่ระบบ</button>`)}
 async function adminLogin(){try{const r=await api('login',$('#adminUid').value.trim(),$('#adminPin').value.trim());if(!['owner','accounting'].includes(r.user.role)){try{await api('logout',r.token)}catch(e){}throw new Error('บัญชีพนักงานใช้หน้าลงเวลาด้านหน้า ไม่สามารถเข้าหลังบ้านได้')}state.token=r.token;state.user=r.user;state.settings=r.settings;localStorage.setItem('kl_token',r.token);closeModal();renderAdmin()}catch(e){err(e)}}
 async function adminLogout(){try{if(state.token&&navigator.onLine)await api('logout',state.token)}catch(e){}localStorage.removeItem('kl_token');state.token='';state.user=null;state.home=null;renderKiosk()}
-async function startKioskPunch(type){const uid=String($('#kUid')?.value||'').normalize('NFKC').replace(/\s+/g,'').toUpperCase(),pin=String($('#kPin')?.value||'').trim();if(!uid||!pin){toast('กรุณากรอกรหัสพนักงานและ PIN');return}assertKioskAttemptAllowed(uid);const lockedAt=lockNowIso(),eventId=makeEventId();state.kioskCtx={uid,pin,type,lockedAt,eventId,deviceId:kioskDeviceId(),ticket:null,permit:null,user:null,faceTemplate:null,authReady:false,faceReady:false,gpsReady:false,cameraReady:false,faceScanStarted:false,faceProof:null,submitting:false,deadline:Date.now()+90000};state.cameraFacing='user';window.__klLoc=null;openModal(`<div class="section-head"><h2>${type==='in'?'เข้างาน':'ออกงาน'}</h2><button class="btn secondary" onclick="cancelKioskPunch()">ยกเลิก</button></div><div class="locked-box"><div>✓ ล็อกเวลาแล้ว</div><div id="lockedTime" class="locked-time">${esc(kioskTimeText(lockedAt))}</div><div id="kioskCountdown" class="countdown">กรุณายืนยันหน้าและ GPS ภายใน 90 วินาที</div></div><div class="video"><video id="cam" class="mirror" autoplay playsinline muted></video><div class="face-guide"></div></div><div class="camera-tools"><button class="btn secondary" onclick="switchCamera()">สลับกล้อง หน้า/หลัง</button></div><div id="gpsStatus" class="notice" style="margin-top:10px">กำลังตรวจรหัส <b>${esc(uid)}</b> เปิดกล้อง และอ่าน GPS...</div><button id="confirmKiosk" class="btn ${type==='in'?'green':'red'} full" style="margin-top:12px" disabled onclick="captureKioskPunch()">กำลังยืนยันอัตโนมัติ...</button>`);startKioskCountdown();startCamera().then(ok=>{if(state.kioskCtx){state.kioskCtx.cameraReady=!!ok;refreshKioskReady()}});getGpsForKiosk();if(navigator.onLine){api('prepareKioskPunch',uid,pin,type,eventId,lockedAt,kioskDeviceId()).then(r=>{if(!state.kioskCtx||state.kioskCtx.eventId!==eventId)return;state.kioskCtx.ticket=r.ticket;state.kioskCtx.lockedAt=r.lockedAt||lockedAt;state.kioskCtx.user=r.user;state.kioskCtx.faceTemplate=r.faceTemplate||null;state.kioskCtx.faceReady=!!r.faceTemplate;if(r.faceTemplate)saveFaceLocal(r.faceTemplate);state.kioskCtx.authReady=true;if(!r.faceTemplate){kioskPunchError(new Error('พนักงานคนนี้ยังไม่ได้ลงทะเบียนใบหน้า'));return}if(r.offlineCredential){saveKioskCredential(r.offlineCredential);state.kioskCtx.permit=r.offlineCredential.permit}if(r.home)saveKioskStatus(uid,r.home);const t=$('#lockedTime');if(t)t.textContent=kioskTimeText(state.kioskCtx.lockedAt);clearKioskPinAttempts(uid);refreshKioskReady()}).catch(async e=>{if(networkError(e)){try{const c=await verifyOfflineKioskPin(uid,pin);if(state.kioskCtx&&state.kioskCtx.eventId===eventId){state.kioskCtx.permit=c.permit;state.kioskCtx.user=c;state.kioskCtx.authReady=true;refreshKioskReady();loadOfflineFaceForPunch(uid,eventId)}}catch(x){kioskPunchError(x)}}else{kioskPunchError(e)}})}else{verifyOfflineKioskPin(uid,pin).then(c=>{if(state.kioskCtx&&state.kioskCtx.eventId===eventId){state.kioskCtx.permit=c.permit;state.kioskCtx.user=c;state.kioskCtx.authReady=true;refreshKioskReady();loadOfflineFaceForPunch(uid,eventId)}}).catch(kioskPunchError)}}
+async function startKioskPunch(type){const uid=String($('#kUid')?.value||'').normalize('NFKC').replace(/\s+/g,'').toUpperCase(),pin=String($('#kPin')?.value||'').trim();if(!uid||!pin){toast('กรุณากรอกรหัสพนักงานและ PIN');return}assertKioskAttemptAllowed(uid);const lockedAt=lockNowIso(),eventId=makeEventId();state.kioskCtx={uid,pin,type,lockedAt,eventId,deviceId:kioskDeviceId(),ticket:null,permit:null,user:null,faceTemplate:null,authReady:false,faceReady:false,gpsReady:false,cameraReady:false,faceScanStarted:false,faceProof:null,submitting:false,deadline:Date.now()+90000};state.cameraFacing='user';window.__klLoc=gpsLocFresh(__klWarmLoc)?{lat:__klWarmLoc.lat,lng:__klWarmLoc.lng,accuracy:__klWarmLoc.accuracy}:null;openModal(`<div class="section-head"><h2>${type==='in'?'เข้างาน':'ออกงาน'}</h2><button class="btn secondary" onclick="cancelKioskPunch()">ยกเลิก</button></div><div class="locked-box"><div>✓ ล็อกเวลาแล้ว</div><div id="lockedTime" class="locked-time">${esc(kioskTimeText(lockedAt))}</div><div id="kioskCountdown" class="countdown">กรุณายืนยันหน้าและ GPS ภายใน 90 วินาที</div></div><div class="video"><video id="cam" class="mirror" autoplay playsinline muted></video><div class="face-guide"></div></div><div class="camera-tools"><button class="btn secondary" onclick="switchCamera()">สลับกล้อง หน้า/หลัง</button></div><div id="gpsStatus" class="notice" style="margin-top:10px">กำลังตรวจ PIN · เตรียมใบหน้า · ตรวจ GPS...</div><button id="confirmKiosk" class="btn ${type==='in'?'green':'red'} full" style="margin-top:12px" disabled onclick="captureKioskPunch()">กำลังยืนยันอัตโนมัติ...</button>`);if(window.__klLoc&&Number(window.__klLoc.accuracy)<=100)state.kioskCtx.gpsReady=true;startKioskCountdown();startCamera().then(ok=>{if(state.kioskCtx){state.kioskCtx.cameraReady=!!ok;refreshKioskReady()}});getGpsForKiosk();if(navigator.onLine){api('prepareKioskPunch',uid,pin,type,eventId,lockedAt,kioskDeviceId()).then(r=>{if(!state.kioskCtx||state.kioskCtx.eventId!==eventId)return;state.kioskCtx.ticket=r.ticket;state.kioskCtx.lockedAt=r.lockedAt||lockedAt;state.kioskCtx.user=r.user;state.kioskCtx.faceTemplate=r.faceTemplate||null;state.kioskCtx.faceReady=!!r.faceTemplate;if(r.faceTemplate)saveFaceLocal(r.faceTemplate);state.kioskCtx.authReady=true;if(!r.faceTemplate){kioskPunchError(new Error('พนักงานคนนี้ยังไม่ได้ลงทะเบียนใบหน้า'));return}if(r.offlineCredential){saveKioskCredential(r.offlineCredential);state.kioskCtx.permit=r.offlineCredential.permit}if(r.home)saveKioskStatus(uid,r.home);const t=$('#lockedTime');if(t)t.textContent=kioskTimeText(state.kioskCtx.lockedAt);clearKioskPinAttempts(uid);refreshKioskReady()}).catch(async e=>{if(networkError(e)){try{const c=await verifyOfflineKioskPin(uid,pin);if(state.kioskCtx&&state.kioskCtx.eventId===eventId){state.kioskCtx.permit=c.permit;state.kioskCtx.user=c;state.kioskCtx.authReady=true;refreshKioskReady();loadOfflineFaceForPunch(uid,eventId)}}catch(x){kioskPunchError(x)}}else{kioskPunchError(e)}})}else{verifyOfflineKioskPin(uid,pin).then(c=>{if(state.kioskCtx&&state.kioskCtx.eventId===eventId){state.kioskCtx.permit=c.permit;state.kioskCtx.user=c;state.kioskCtx.authReady=true;refreshKioskReady();loadOfflineFaceForPunch(uid,eventId)}}).catch(kioskPunchError)}}
 async function loadOfflineFaceForPunch(uid,eventId){
   try{
     const f=await withTimeout(faceGet(uid),5000,'อ่านข้อมูลใบหน้าออฟไลน์นานเกินไป');
@@ -158,7 +207,51 @@ async function loadOfflineFaceForPunch(uid,eventId){
 }
 function kioskPunchError(e){if(state.kioskCtx){state.kioskCtx.authReady=false}const s=$('#gpsStatus');if(s)s.innerHTML='<b>ยืนยันไม่ผ่าน:</b> '+esc(e.message||String(e));const b=$('#confirmKiosk');if(b)b.disabled=true;toast(e.message||String(e))}
 function startKioskCountdown(){clearInterval(window.__kioskCountdown);window.__kioskCountdown=setInterval(()=>{if(!state.kioskCtx){clearInterval(window.__kioskCountdown);return}const left=Math.ceil((state.kioskCtx.deadline-Date.now())/1000),e=$('#kioskCountdown');if(e)e.textContent=left>0?`กรุณายืนยันหน้าและ GPS ภายใน ${left} วินาที`:'หมดเวลายืนยัน กรุณากดลงเวลาใหม่';if(left<=0){const b=$('#confirmKiosk');if(b)b.disabled=true;clearInterval(window.__kioskCountdown)}},500)}
-function getGpsForKiosk(){if(!navigator.geolocation){kioskPunchError(new Error('อุปกรณ์ไม่รองรับ GPS'));return}navigator.geolocation.getCurrentPosition(p=>{if(!state.kioskCtx)return;window.__klLoc={lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy};state.kioskCtx.gpsReady=Number(p.coords.accuracy)<=100;refreshKioskReady()},e=>kioskPunchError(new Error('อ่าน GPS ไม่ได้ กรุณาเปิด Location และอนุญาตสิทธิ์')),{enableHighAccuracy:true,timeout:15000,maximumAge:0})}
+function getGpsForKiosk(){
+  if(!navigator.geolocation){
+    kioskPunchError(new Error('อุปกรณ์ไม่รองรับ GPS'));
+    return;
+  }
+
+  startGpsWarmup();
+
+  // ถ้าหน้าหลักจับ GPS ไว้ไม่เกิน 30 วินาทีและแม่น <=100 ม. ใช้ได้ทันที
+  if(useWarmGpsForPunch())return;
+
+  const eventId=state.kioskCtx&&state.kioskCtx.eventId;
+  let finished=false;
+
+  const tm=setTimeout(()=>{
+    if(finished)return;
+    const c=state.kioskCtx;
+    if(!c||c.eventId!==eventId)return;
+    if(useWarmGpsForPunch())return;
+    const s=$('#gpsStatus');
+    if(s)s.textContent='กำลังรอ GPS · กรุณาอยู่ใกล้หน้าต่างหรือจุดที่รับสัญญาณได้';
+  },3500);
+
+  navigator.geolocation.getCurrentPosition(
+    p=>{
+      if(finished)return;
+      finished=true;
+      clearTimeout(tm);
+      acceptWarmGps(p);
+      if(!state.kioskCtx||state.kioskCtx.eventId!==eventId)return;
+      window.__klLoc={lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy};
+      state.kioskCtx.gpsReady=Number(p.coords.accuracy)<=100;
+      refreshKioskReady();
+    },
+    e=>{
+      if(finished)return;
+      finished=true;
+      clearTimeout(tm);
+      if(useWarmGpsForPunch())return;
+      if(!state.kioskCtx||state.kioskCtx.eventId!==eventId)return;
+      kioskPunchError(new Error('อ่าน GPS ไม่ได้ กรุณาเปิด Location และอนุญาตสิทธิ์'));
+    },
+    {enableHighAccuracy:true,timeout:6000,maximumAge:30000}
+  );
+}
 function refreshKioskReady(){
   const c=state.kioskCtx;if(!c)return;
   const s=$('#gpsStatus'),b=$('#confirmKiosk'),l=window.__klLoc;
