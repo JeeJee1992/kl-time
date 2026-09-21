@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>KL TIME · บัญชีและเงินเดือน · V3.3</title>
+<title>KL TIME · บัญชีและเงินเดือน · V3.4</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--dark2:#374151;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 8px 25px rgba(17,24,39,.08)}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}.muted{color:var(--muted)}.red-t{color:var(--red)}.green-t{color:var(--green)}.amber-t{color:var(--amber)}
@@ -664,16 +664,17 @@ async function saveOt(uid){try{await api('saveOvertime',state.token,{userId:uid,
 function openAdjForm(uid,type){const p=periodDates(),d=window.__payDetail;modal(`<div class="section-head"><h2>${type==='เพิ่ม'?'เงินเพิ่ม':'รายการหัก'} · ${esc(d.user.name)}</h2><button class="btn secondary" onclick="payrollDetail('${uid}')">ย้อนกลับ</button></div><div class="field"><label>หมวด</label><input id="adjCat" placeholder="เช่น โบนัส / ขาดงาน / เบิกล่วงหน้า"></div><div class="field"><label>จำนวนเงิน</label><input id="adjAmt" type="number" step="0.01" min="0"></div><div class="field"><label>หมายเหตุ</label><input id="adjNote"></div><button class="btn full" onclick="saveAdj('${uid}','${type}','${p.from}','${p.to}')">บันทึก</button>`,true)}
 async function saveAdj(uid,type,from,to){try{await api('savePayrollAdjustment',state.token,{userId:uid,type,from,to,category:$('#adjCat').value,amount:$('#adjAmt').value,note:$('#adjNote').value});toast('บันทึกรายการแล้ว');await payrollDetail(uid)}catch(e){err(e)}}async function deleteAdj(id,uid){if(!confirm('ลบรายการนี้?'))return;try{await api('deletePayrollAdjustment',state.token,id);await payrollDetail(uid)}catch(e){err(e)}}
 async function loadEmployees(){
-  const [rows,depts,branches]=await Promise.all([api('getEmployees',state.token,state.branchFilter),api('getDepartments',state.token),api('getBranches',state.token)]);
+  const d=await api('getEmployeePageData',state.token,state.branchFilter);
+  const rows=d.employees||[],depts=d.departments||[],branches=d.branches||[];
   state.employees=rows;state.departments=depts;state.branches=branches;
   $('#content').innerHTML=`<div class="card"><div class="section-head"><div><h2>ข้อมูลพนักงาน</h2><div class="sub">พนักงานต้องมีสาขาประจำ + แผนก</div></div><div class="row"><button class="btn secondary" onclick="departmentCodeDialog()">จัดการแผนก</button>${state.user?.role==='owner'?'<button class="btn red" onclick="migrateDepartmentIds()">เปลี่ยนรหัสทั้งหมด</button>':''}<button class="btn" onclick="addEmployeeDialog()">+ เพิ่มพนักงาน</button></div></div>
   <div class="table-wrap"><table><thead><tr><th>รหัส</th><th>ชื่อ</th><th>สาขา</th><th>แผนก</th><th>ข้ามสาขา</th><th>ประเภทค่าจ้าง</th><th>ค่าจ้าง</th><th>ใบหน้า</th><th>สถานะ</th><th>จัดการ</th></tr></thead>
   <tbody>${rows.map(r=>`<tr><td><b>${esc(r.userId)}</b></td><td><b>${esc(r.name)}</b></td><td><select id="br_${r.userId}" onchange="saveEmpBranch('${r.userId}',this.value,$('#cross_${r.userId}').checked)" style="min-width:150px"><option value="">-- เลือกสาขา --</option>${(state.branches||[]).filter(x=>x.active).map(b=>`<option value="${b.code}" ${r.branchCode===b.code?'selected':''}>${esc(b.name)}</option>`).join('')}</select></td><td>${esc(r.department)}</td><td style="text-align:center"><input id="cross_${r.userId}" type="checkbox" style="width:auto" ${r.allowCrossBranch?'checked':''} onchange="saveEmpBranch('${r.userId}',$('#br_${r.userId}').value,this.checked)"></td><td>${wageLabel(r.payroll?.wageType)}</td><td>${r.payroll?.wageType==='monthly'?fmtMoney(r.payroll.monthlySalary):fmtMoney(r.payroll?.dailyRate)+'/วัน'}</td><td>${r.faceRegistered?'<span class="badge green">มี Face</span>':'<span class="badge amber">ยังไม่มี</span>'}</td><td><span class="badge ${r.active?'green':'red'}">${r.active?'ใช้งาน':'ปิด'}</span></td><td><div class="row"><button class="btn secondary small" onclick="payProfileDialog('${r.userId}')">ค่าจ้าง</button><button class="btn secondary small" onclick="faceEnroll('${r.userId}')">${r.faceRegistered?'ลงทะเบียนหน้าใหม่':'ลงทะเบียนหน้า'}</button><button class="btn secondary small" onclick="resetPinDialog('${r.userId}')">PIN</button><button class="btn ${r.active?'red':'green'} small" onclick="toggleEmp('${r.userId}',${!r.active})">${r.active?'ปิด':'เปิด'}</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
 }
-async function saveEmpBranch(uid,branchCode,cross){try{await api('saveEmployeeBranch',state.token,uid,branchCode,!!cross);toast('บันทึกสาขาพนักงานแล้ว');loadEmployees()}catch(e){err(e)}}
+async function saveEmpBranch(uid,branchCode,cross){try{await api('saveEmployeeBranch',state.token,uid,branchCode,!!cross);const e=state.employees.find(x=>x.userId===uid);if(e){e.branchCode=branchCode||'';e.branchName=branchName(branchCode)||'';e.allowCrossBranch=!!cross}toast('บันทึกสาขาพนักงานแล้ว')}catch(e){err(e)}}
 async function departmentCodeDialog(){
   try{
-    const rows=await api('getDepartments',state.token);
+    const rows=(state.departments&&state.departments.length)?state.departments:await api('getDepartments',state.token);
     modal(`<div class="section-head"><div><h2>จัดการแผนก</h2><div class="sub">เพิ่มแผนกใหม่ แก้รหัส 2 ตัว และเปิด/ปิดการใช้งาน</div></div><div class="row"><button class="btn" onclick="newDepartmentDialog()">+ เพิ่มแผนก</button><button class="btn secondary" onclick="closeModal()">ปิด</button></div></div>
       <div class="notice">รหัสพนักงานจะใช้ <b>รหัสแผนก 2 ตัว + เลขลำดับ 3 ตัว</b> เช่น ฝ่ายผลิต PD → PD001, PD002</div>
       <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>แผนก</th><th>รหัส 2 ตัว</th><th>รหัสถัดไป</th><th>สถานะ</th><th></th></tr></thead><tbody>
@@ -685,9 +686,9 @@ async function departmentCodeDialog(){
 async function saveDeptCode(encodedDept,i){
   try{
     const department=decodeURIComponent(encodedDept),code=$('#dc'+i).value.trim().toUpperCase(),active=$('#da'+i).checked;
-    await api('saveDepartmentCode',state.token,{department,code,active});
+    const r=await api('saveDepartmentCode',state.token,{department,code,active});
     toast('บันทึกแผนกแล้ว');
-    state.departments=await api('getDepartments',state.token);
+    state.departments=r.departments||[];
     departmentCodeDialog();
   }catch(e){err(e)}
 }
@@ -702,9 +703,9 @@ async function saveNewDepartment(){
   try{
     const department=$('#ndName').value.trim(),code=$('#ndCode').value.trim().toUpperCase();
     if(!department)throw new Error('กรุณากรอกชื่อแผนก');
-    await api('saveDepartmentCode',state.token,{department,code,active:true});
+    const r=await api('saveDepartmentCode',state.token,{department,code,active:true});
     toast('เพิ่มแผนกแล้ว');
-    state.departments=await api('getDepartments',state.token);
+    state.departments=r.departments||[];
     departmentCodeDialog();
   }catch(e){err(e)}
 }
