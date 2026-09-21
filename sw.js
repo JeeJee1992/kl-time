@@ -1,4 +1,4 @@
-const CACHE='kl-time-hr-full-v3-2-late-deduction';
+const CACHE='kl-time-hr-full-v3-3-department-management';
 const FACE_CACHE='kl-time-face-assets-v1';
 const ASSETS=['./','./index.html','./fast.html','./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
