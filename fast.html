@@ -8,7 +8,7 @@
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
-button,input{font:inherit}.wrap{max-width:760px;margin:0 auto;padding:14px}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+button,input,select{font:inherit}.wrap{max-width:760px;margin:0 auto;padding:14px}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
 .brand{display:flex;align-items:center;gap:10px}.logo{width:44px;height:44px;border-radius:13px;background:var(--dark);color:#fff;display:grid;place-items:center;font-weight:900}
 h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;background:#d1fae5;color:#065f46;font-size:12px;font-weight:900}.pill.off{background:#ffedd5;color:#9a3412}
 .card{background:#fff;border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:14px}.video{position:relative;background:#111;border-radius:18px;overflow:hidden;aspect-ratio:4/3}
@@ -23,7 +23,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 .notice{margin-top:10px;padding:11px 12px;border-radius:12px;background:#f9fafb;border:1px solid var(--line);font-size:13px;line-height:1.5}.notice.warn{background:#fff7ed;border-color:#fdba74;color:#9a3412}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.btn{border:0;border-radius:11px;padding:10px 13px;font-weight:800;background:#e5e7eb;color:#111827;cursor:pointer}.btn.dark{background:var(--dark);color:#fff}.btn.red{background:#fee2e2;color:#991b1b}
 .result{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:16px;z-index:100}.result.show{display:grid}.result-card{width:min(430px,100%);background:#fff;border-radius:22px;padding:24px;text-align:center}.result-icon{font-size:58px}.result-name{font-size:24px;font-weight:900}.result-time{font-size:38px;font-weight:900;margin:8px 0}.result-in{color:#047857}.result-out{color:#b91c1c}
-.modal{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:14px;z-index:120}.modal.show{display:grid}.modal-card{width:min(430px,100%);background:#fff;border-radius:20px;padding:18px}.field{margin:10px 0}.field label{display:block;font-weight:800;font-size:13px;margin-bottom:6px}.field input{width:100%;border:1px solid var(--line);border-radius:11px;padding:11px}
+.modal{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:14px;z-index:120}.modal.show{display:grid}.modal-card{width:min(430px,100%);background:#fff;border-radius:20px;padding:18px}.field{margin:10px 0}.field label{display:block;font-weight:800;font-size:13px;margin-bottom:6px}.field input,.field select{width:100%;border:1px solid var(--line);border-radius:11px;padding:11px;background:#fff}
 .loader{position:fixed;inset:0;background:rgba(255,255,255,.75);display:none;place-items:center;z-index:150}.loader.show{display:grid}.spinner{width:42px;height:42px;border-radius:50%;border:5px solid #d1d5db;border-top-color:#374151;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .small{font-size:11px;color:var(--muted)}.queue{font-weight:900;color:#b45309}
 @media(max-width:560px){.wrap{padding:8px}.card{padding:9px;border-radius:16px}.video{border-radius:14px}.guide{inset:8% 18%}.clock{font-size:32px}.status-grid{grid-template-columns:1fr 1fr 1fr}}
@@ -81,6 +81,12 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
   <div class="notice warn">ทำครั้งแรกและเมื่อข้อมูลพนักงาน/ใบหน้าเปลี่ยน ต้องออนไลน์</div>
   <div class="field"><label>รหัส OWNER / บัญชี</label><input id="adminUid" autocomplete="username"></div>
   <div class="field"><label>PIN</label><input id="adminPin" type="password" inputmode="numeric"></div>
+  <div class="field">
+    <label>สาขาของเครื่องนี้</label>
+    <select id="prepareBranch">
+      <option value="">กำลังโหลดสาขา...</option>
+    </select>
+  </div>
   <button class="btn dark" style="width:100%" onclick="prepareDevice()">ดาวน์โหลดพนักงานและใบหน้า</button>
 </div></div>
 
@@ -92,7 +98,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
   <div class="notice warn">
     ใช้เมื่อ Face/กล้องมีปัญหา ระบบจะบันทึกโหมด <b>PIN สำรอง</b> ไว้ใน Sheet และ Audit Log
   </div>
-  <div class="field"><label>รหัสพนักงาน</label><input id="fallbackUid" autocomplete="off" autocapitalize="characters" placeholder="เช่น KL001"></div>
+  <div class="field"><label>รหัสพนักงาน</label><input id="fallbackUid" autocomplete="off" autocapitalize="characters" placeholder="เช่น PD001"></div>
   <div class="field"><label>PIN</label><input id="fallbackPin" type="password" inputmode="numeric" autocomplete="off"></div>
   <div id="fallbackStatus" class="notice">GPS ยังต้องอยู่ในพื้นที่บริษัทเหมือนเดิม</div>
   <button id="fallbackSubmit" class="btn dark" style="width:100%;margin-top:10px" onclick="submitFallback()">ยืนยันด้วย PIN สำรอง</button>
@@ -106,11 +112,11 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 const DEVICE_KEY='kl_kiosk_device_v4';
-const CRED_KEY='kl_kiosk_offline_credentials_dept_v1';
-const STATUS_KEY='kl_fast_kiosk_status_dept_v1';
+const CRED_KEY='kl_kiosk_offline_credentials_branch_v1';
+const STATUS_KEY='kl_fast_kiosk_status_branch_v1';
 const QUEUE_DB='kl_time_offline_v2';
-const QUEUE_STORE='attendance_queue_dept_v1';
-const FACE_STORE='face_templates_dept_v1';
+const QUEUE_STORE='attendance_queue_branch_v1';
+const FACE_STORE='face_templates_branch_v1';
 const FACE_DB='kl_time_offline_v2';
 const FACE_MODEL_BASE='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
 const FACE_ASSETS=[
@@ -125,10 +131,11 @@ const FACE_ASSETS=[
 ];
 const FAST_PASS=.50, CONFIRM_MAX=.60, CONFIRM_AVG=.55, SECOND_MARGIN=.06;
 const GPS_MAX_AGE=30000;
+const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
   stream:null,models:false,employees:[],gps:null,gpsWatch:null,
   scanning:false,paused:false,lastNoFaceAt:0,serverEpoch:0,serverPerf:0,
-  cooldown:{},queueSyncing:false
+  cooldown:{},queueSyncing:false,branch:null
 };
 
 function backendUrl(){return String(window.KL_BACKEND_URL||'').trim()}
@@ -140,6 +147,12 @@ function api(fn,...args){if(!navigator.onLine)return Promise.reject(new Error('O
 function loader(v){$('#loader').classList.toggle('show',!!v)}
 
 function deviceId(){let v=localStorage.getItem(DEVICE_KEY);if(!v){v='kiosk_'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'_'+Math.random());localStorage.setItem(DEVICE_KEY,v)}return v}
+function savedBranch(){try{return JSON.parse(localStorage.getItem(BRANCH_KEY)||'null')}catch(e){return null}}
+function saveBranchLocal(b){
+  state.branch=b||null;
+  if(b)localStorage.setItem(BRANCH_KEY,JSON.stringify(b));
+  else localStorage.removeItem(BRANCH_KEY);
+}
 function creds(){try{return JSON.parse(localStorage.getItem(CRED_KEY)||'{}')}catch(e){return {}}}
 function saveCred(c){const all=creds();all[String(c.userId).toUpperCase()]=c;localStorage.setItem(CRED_KEY,JSON.stringify(all))}
 function normUid(v){return String(v||'').normalize('NFKC').replace(/\s+/g,'').toUpperCase()}
@@ -181,7 +194,7 @@ function statusMap(){try{return JSON.parse(localStorage.getItem(STATUS_KEY)||'{}
 function saveHome(uid,home){const m=statusMap();m[String(uid).toUpperCase()]={home,savedAt:new Date().toISOString()};localStorage.setItem(STATUS_KEY,JSON.stringify(m))}
 function getHome(uid){const x=statusMap()[String(uid).toUpperCase()];return x&&x.home||null}
 
-function idbOpen(){return new Promise((resolve,reject)=>{const q=indexedDB.open(FACE_DB,3);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains(QUEUE_STORE)){const s=d.createObjectStore(QUEUE_STORE,{keyPath:'eventId'});s.createIndex('userId','userId',{unique:false})}if(!d.objectStoreNames.contains(FACE_STORE))d.createObjectStore(FACE_STORE,{keyPath:'userId'})};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
+function idbOpen(){return new Promise((resolve,reject)=>{const q=indexedDB.open(FACE_DB,4);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains(QUEUE_STORE)){const s=d.createObjectStore(QUEUE_STORE,{keyPath:'eventId'});s.createIndex('userId','userId',{unique:false})}if(!d.objectStoreNames.contains(FACE_STORE))d.createObjectStore(FACE_STORE,{keyPath:'userId'})};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
 async function facePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(FACE_STORE,'readwrite');tx.objectStore(FACE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
 async function faceAll(){const d=await idbOpen();return new Promise((res,rej)=>{const r=d.transaction(FACE_STORE,'readonly').objectStore(FACE_STORE).getAll();r.onsuccess=()=>{const x=r.result||[];d.close();res(x)};r.onerror=()=>{d.close();rej(r.error)}})}
 async function queuePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(QUEUE_STORE,'readwrite');tx.objectStore(QUEUE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
@@ -303,7 +316,7 @@ async function punch(user,proof){
     localDate:new Date(lock).toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}),
     lat:state.gps.lat,lng:state.gps.lng,accuracy:state.gps.accuracy,
     photoDataUrl:photo,faceProof:proof,device:navigator.userAgent,
-    deviceId:deviceId(),permit:cred.permit,createdAt:new Date().toISOString(),failed:false
+    deviceId:deviceId(),permit:cred.permit,branchCode:state.branch?.code||'',createdAt:new Date().toISOString(),failed:false
   };
 
   state.paused=true;
@@ -384,7 +397,7 @@ async function reloadEmployees(){
     const c=cs[String(f.userId).toUpperCase()];
     if(!c)continue;
     if(new Date(c.expiresAt).getTime()<Date.now())continue;
-    arr.push({userId:f.userId,name:c.name||f.userId,department:c.department||'',descriptors:f.descriptors||[],version:f.version||'',expiresAt:c.expiresAt});
+    arr.push({userId:f.userId,name:c.name||f.userId,department:c.department||'',branchCode:c.branchCode||'',branchName:c.branchName||'',descriptors:f.descriptors||[],version:f.version||'',expiresAt:c.expiresAt});
   }
   state.employees=arr;
   updateDeviceInfo();
@@ -394,7 +407,7 @@ function updateDeviceInfo(){
   qPromise.then(q=>{
     const validCreds=Object.values(creds()).filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now());
     const exp=validCreds[0]&&validCreds[0].expiresAt?new Date(validCreds[0].expiresAt).toLocaleString('th-TH'):'-';
-    $('#deviceInfo').innerHTML=`เครื่อง <b>${esc(deviceId().slice(-10))}</b> · Face <b>${state.employees.length}</b> คน · PIN สำรอง <b>${validCreds.length}</b> คน · รอซิงก์ <span class="queue">${q}</span><br><span class="small">สิทธิ์เครื่องหมดอายุ: ${esc(exp)}</span>`;
+    $('#deviceInfo').innerHTML=`สาขา <b>${esc(state.branch?.name||'ยังไม่กำหนด')}</b> · เครื่อง <b>${esc(deviceId().slice(-10))}</b> · Face <b>${state.employees.length}</b> คน · PIN สำรอง <b>${validCreds.length}</b> คน · รอซิงก์ <span class="queue">${q}</span><br><span class="small">สิทธิ์เครื่องหมดอายุ: ${esc(exp)}</span>`;
   })
 }
 
@@ -466,7 +479,7 @@ async function submitFallback(){
       lat:state.gps.lat,lng:state.gps.lng,accuracy:state.gps.accuracy,
       photoDataUrl:photo,
       device:navigator.userAgent,deviceId:deviceId(),
-      permit:c.permit,createdAt:new Date().toISOString(),failed:false,
+      permit:c.permit,branchCode:state.branch?.code||'',createdAt:new Date().toISOString(),failed:false,
       fallbackFaceCheck:faceCheck.reason
     };
 
@@ -506,34 +519,89 @@ async function submitFallback(){
   }
 }
 
-function openPrepare(){$('#prepareModal').classList.add('show')}
+async function openPrepare(){
+  $('#prepareModal').classList.add('show');
+  try{
+    const rows=await api('getPublicBranches');
+    const current=savedBranch()?.code||'';
+    $('#prepareBranch').innerHTML='<option value="">-- เลือกสาขา --</option>'+
+      rows.map(x=>`<option value="${x.code}" ${x.code===current?'selected':''}>${esc(x.name)} (${esc(x.code)})</option>`).join('');
+  }catch(e){
+    $('#prepareBranch').innerHTML='<option value="">โหลดรายการสาขาไม่ได้</option>';
+  }
+}
 function closePrepare(){$('#prepareModal').classList.remove('show')}
 async function prepareDevice(){
   if(!navigator.onLine){alert('ต้องออนไลน์เพื่อเตรียมเครื่อง');return}
-  const uid=$('#adminUid').value.trim(),pin=$('#adminPin').value.trim();
+  const uid=$('#adminUid').value.trim(),
+        pin=$('#adminPin').value.trim(),
+        branchCode=$('#prepareBranch').value;
+
   if(!uid||!pin){alert('กรุณากรอกรหัสและ PIN');return}
+  if(!branchCode){alert('กรุณาเลือกสาขาของเครื่อง Kiosk');return}
+
   try{
     loader(true);
+
+    // ถ้าจะเปลี่ยนสาขา ต้องไม่มีรายการออฟไลน์ค้าง
+    const pending=(await queueAll()).filter(x=>x.fastKiosk&&!x.failed);
+    const oldBranch=savedBranch();
+    if(pending.length&&oldBranch&&oldBranch.code!==branchCode){
+      throw new Error('มีรายการออฟไลน์รอซิงก์ '+pending.length+' รายการ กรุณาซิงก์ให้หมดก่อนเปลี่ยนสาขาเครื่อง');
+    }
+
     const l=await api('login',uid,pin);
     if(!['owner','accounting'].includes(l.user.role))throw new Error('ต้องใช้ OWNER หรือบัญชี');
+
     await cacheFaceAssets();
-    const r=await api('prepareKioskOfflineBundle',l.token,deviceId());
+
+    // สำคัญ: ส่ง branchCode ให้ Backend
+    const r=await api('prepareKioskOfflineBundle',l.token,deviceId(),branchCode);
+
+    // ล้าง cache พนักงาน/ใบหน้าชุดเดิม เพื่อไม่ปนคนต่างสาขา
+    localStorage.removeItem(CRED_KEY);
+    localStorage.removeItem(STATUS_KEY);
+
+    const db=await idbOpen();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(FACE_STORE,'readwrite');
+      tx.objectStore(FACE_STORE).clear();
+      tx.oncomplete=()=>{db.close();resolve()};
+      tx.onerror=()=>{db.close();reject(tx.error)};
+    });
+
+    saveBranchLocal(r.branch);
+
     for(const x of r.employees||[]){
       const t=x.faceTemplate,home=x.home;
-      const c=Object.assign({},x);delete c.faceTemplate;delete c.home;
+      const c=Object.assign({},x);
+      delete c.faceTemplate;delete c.home;
       saveCred(c);
-      if(t)await facePut({userId:String(t.userId).toUpperCase(),descriptors:t.descriptors||[],version:t.version||'',updatedAt:t.updatedAt||new Date().toISOString()});
+      if(t)await facePut({
+        userId:String(t.userId).toUpperCase(),
+        descriptors:t.descriptors||[],
+        version:t.version||'',
+        updatedAt:t.updatedAt||new Date().toISOString()
+      });
       if(home)saveHome(x.userId,home);
     }
+
     try{await api('logout',l.token)}catch(e){}
+
     await reloadEmployees();
     closePrepare();
-    const pinCount=Object.values(creds()).filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now()).length;
-    setMain('เตรียมเครื่องสำเร็จ','Face '+state.employees.length+' คน · PIN สำรอง '+pinCount+' คน');
-  }catch(e){alert(e.message||String(e))}
-  finally{loader(false)}
-}
 
+    const pinCount=Object.values(creds()).filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now()).length;
+    setMain(
+      'เตรียมเครื่องสำเร็จ',
+      `${r.branch?.name||branchCode} · Face ${state.employees.length} คน · PIN สำรอง ${pinCount} คน`
+    );
+  }catch(e){
+    alert(e.message||String(e));
+  }finally{
+    loader(false);
+  }
+}
 async function syncQueue(show){
   if(state.queueSyncing||!navigator.onLine)return;
   state.queueSyncing=true;
@@ -564,6 +632,7 @@ window.addEventListener('online',()=>{updateNet();syncClock();syncQueue(false)})
 window.addEventListener('offline',updateNet);
 
 async function boot(){
+  state.branch=savedBranch();
   updateNet();
   const tick=()=>{$('#clock').textContent=new Date(serverNow()).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})};
   tick();setInterval(tick,1000);
@@ -580,8 +649,8 @@ async function boot(){
     setMain('Face มีปัญหา','ยังใช้ “รหัสสำรอง” ได้ ถ้า GPS พร้อม');
   }
   await reloadEmployees();
-  if(!state.employees.length){
-    setMain('ยังไม่ได้เตรียมเครื่อง','กด “เตรียมเครื่อง / อัปเดตพนักงาน”');
+  if(!state.branch||!state.employees.length){
+    setMain('ยังไม่ได้เตรียมเครื่อง','เลือกสาขาแล้วกด “เตรียมเครื่อง / อัปเดตพนักงาน”');
     openPrepare();
   }else{
     if(state.models&&state.stream)setMain('พร้อมรับพนักงาน','เดินเข้ากรอบทีละ 1 คน');
