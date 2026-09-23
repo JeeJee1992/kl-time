@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK</title>
+<title>KL TIME FAST KIOSK · V3.8</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -155,6 +155,14 @@ function saveBranchLocal(b){
 }
 function creds(){try{return JSON.parse(localStorage.getItem(CRED_KEY)||'{}')}catch(e){return {}}}
 function saveCred(c){const all=creds();all[String(c.userId).toUpperCase()]=c;localStorage.setItem(CRED_KEY,JSON.stringify(all))}
+function replaceCredsBatch(list){
+  const all={};
+  for(const c of list||[]){
+    if(!c||!c.userId)continue;
+    all[String(c.userId).toUpperCase()]=c;
+  }
+  localStorage.setItem(CRED_KEY,JSON.stringify(all));
+}
 function normUid(v){return String(v||'').normalize('NFKC').replace(/\s+/g,'').toUpperCase()}
 function hexBytes(buf){return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 async function pinHash(salt,pin){
@@ -192,11 +200,40 @@ async function verifyLocalFallbackPin(uid,pin){
 
 function statusMap(){try{return JSON.parse(localStorage.getItem(STATUS_KEY)||'{}')}catch(e){return {}}}
 function saveHome(uid,home){const m=statusMap();m[String(uid).toUpperCase()]={home,savedAt:new Date().toISOString()};localStorage.setItem(STATUS_KEY,JSON.stringify(m))}
+function replaceHomesBatch(items){
+  const m={};
+  const now=new Date().toISOString();
+  for(const x of items||[]){
+    if(!x||!x.userId||!x.home)continue;
+    m[String(x.userId).toUpperCase()]={home:x.home,savedAt:now};
+  }
+  localStorage.setItem(STATUS_KEY,JSON.stringify(m));
+}
 function getHome(uid){const x=statusMap()[String(uid).toUpperCase()];return x&&x.home||null}
 
 function idbOpen(){return new Promise((resolve,reject)=>{const q=indexedDB.open(FACE_DB,4);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains(QUEUE_STORE)){const s=d.createObjectStore(QUEUE_STORE,{keyPath:'eventId'});s.createIndex('userId','userId',{unique:false})}if(!d.objectStoreNames.contains(FACE_STORE))d.createObjectStore(FACE_STORE,{keyPath:'userId'})};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
 async function facePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(FACE_STORE,'readwrite');tx.objectStore(FACE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
 async function faceAll(){const d=await idbOpen();return new Promise((res,rej)=>{const r=d.transaction(FACE_STORE,'readonly').objectStore(FACE_STORE).getAll();r.onsuccess=()=>{const x=r.result||[];d.close();res(x)};r.onerror=()=>{d.close();rej(r.error)}})}
+async function replaceFacesBatch(items){
+  const d=await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx=d.transaction(FACE_STORE,'readwrite');
+    const store=tx.objectStore(FACE_STORE);
+    store.clear();
+    for(const x of items||[]){
+      if(!x||!x.userId)continue;
+      store.put({
+        userId:String(x.userId).toUpperCase(),
+        descriptors:x.descriptors||[],
+        version:x.version||'',
+        updatedAt:x.updatedAt||new Date().toISOString()
+      });
+    }
+    tx.oncomplete=()=>{d.close();resolve()};
+    tx.onerror=()=>{const e=tx.error;d.close();reject(e)};
+    tx.onabort=()=>{const e=tx.error||new Error('บันทึกใบหน้าไม่สำเร็จ');d.close();reject(e)};
+  });
+}
 async function queuePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(QUEUE_STORE,'readwrite');tx.objectStore(QUEUE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
 async function queueAll(){const d=await idbOpen();return new Promise((res,rej)=>{const r=d.transaction(QUEUE_STORE,'readonly').objectStore(QUEUE_STORE).getAll();r.onsuccess=()=>{const x=r.result||[];d.close();res(x)};r.onerror=()=>{d.close();rej(r.error)}})}
 async function queueDelete(id){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(QUEUE_STORE,'readwrite');tx.objectStore(QUEUE_STORE).delete(id);tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error)}})}
@@ -213,9 +250,29 @@ async function loadModels(){
   state.models=true;$('#faceStatus').textContent='พร้อม';$('#faceStatus').className='green';
 }
 async function cacheFaceAssets(){
-  const c=await caches.open('kl-time-face-assets-v1');
-  for(const u of FACE_ASSETS){try{const r=await fetch(u,{cache:'reload'});if(r.ok)await c.put(u,r.clone())}catch(e){}}
+  // V3.8 SPEED: ถ้าโมเดลพร้อมแล้ว ไม่ดาวน์โหลดไฟล์โมเดลซ้ำ
+  if(state.models)return;
+
+  // โหลดโมเดลผ่าน browser cache ตามปกติ
   await loadModels();
+
+  // เติม Cache Storage เฉพาะไฟล์ที่ยังไม่มี และทำแบบ background
+  // ไม่บล็อกการเตรียมเครื่อง
+  if('caches' in window){
+    Promise.resolve().then(async()=>{
+      try{
+        const c=await caches.open('kl-time-face-assets-v1');
+        await Promise.all(FACE_ASSETS.map(async u=>{
+          try{
+            const hit=await c.match(u);
+            if(hit)return;
+            const r=await fetch(u,{cache:'force-cache'});
+            if(r.ok)await c.put(u,r.clone());
+          }catch(e){}
+        }));
+      }catch(e){}
+    });
+  }
 }
 
 async function startCamera(){
@@ -543,55 +600,67 @@ async function prepareDevice(){
   try{
     loader(true);
 
-    // ถ้าจะเปลี่ยนสาขา ต้องไม่มีรายการออฟไลน์ค้าง
-    const pending=(await queueAll()).filter(x=>x.fastKiosk&&!x.failed);
+    // งาน local และ login ทำพร้อมกัน เพื่อลดเวลารอ
+    const [pendingRows,l]=await Promise.all([
+      queueAll().catch(()=>[]),
+      api('login',uid,pin)
+    ]);
+
+    if(!['owner','accounting'].includes(l.user.role))throw new Error('ต้องใช้ OWNER หรือบัญชี');
+
+    const pending=pendingRows.filter(x=>x.fastKiosk&&!x.failed);
     const oldBranch=savedBranch();
     if(pending.length&&oldBranch&&oldBranch.code!==branchCode){
       throw new Error('มีรายการออฟไลน์รอซิงก์ '+pending.length+' รายการ กรุณาซิงก์ให้หมดก่อนเปลี่ยนสาขาเครื่อง');
     }
 
-    const l=await api('login',uid,pin);
-    if(!['owner','accounting'].includes(l.user.role))throw new Error('ต้องใช้ OWNER หรือบัญชี');
-
+    // ถ้า boot โหลด Face model ไว้แล้ว ฟังก์ชันนี้จะคืนค่าทันที
     await cacheFaceAssets();
 
-    // สำคัญ: ส่ง branchCode ให้ Backend
+    // Backend call หลักเพียงครั้งเดียวสำหรับข้อมูลพนักงาน/ใบหน้า
     const r=await api('prepareKioskOfflineBundle',l.token,deviceId(),branchCode);
+    const employees=r.employees||[];
 
-    // ล้าง cache พนักงาน/ใบหน้าชุดเดิม เพื่อไม่ปนคนต่างสาขา
-    localStorage.removeItem(CRED_KEY);
-    localStorage.removeItem(STATUS_KEY);
+    const credRows=[];
+    const faceRows=[];
+    const homeRows=[];
 
-    const db=await idbOpen();
-    await new Promise((resolve,reject)=>{
-      const tx=db.transaction(FACE_STORE,'readwrite');
-      tx.objectStore(FACE_STORE).clear();
-      tx.oncomplete=()=>{db.close();resolve()};
-      tx.onerror=()=>{db.close();reject(tx.error)};
-    });
+    // เตรียมข้อมูลใน memory ก่อน แล้วเขียนลง storage แบบ batch
+    for(const x of employees){
+      const c=Object.assign({},x);
+      const t=c.faceTemplate;
+      const home=c.home;
+      delete c.faceTemplate;
+      delete c.home;
+
+      credRows.push(c);
+      if(home)homeRows.push({userId:x.userId,home});
+      if(t){
+        faceRows.push({
+          userId:String(t.userId).toUpperCase(),
+          descriptors:t.descriptors||[],
+          version:t.version||'',
+          updatedAt:t.updatedAt||new Date().toISOString()
+        });
+      }
+    }
+
+    // localStorage: เขียน credentials/home อย่างละ 1 ครั้ง
+    replaceCredsBatch(credRows);
+    replaceHomesBatch(homeRows);
+
+    // IndexedDB: ล้าง + ใส่ Face ทั้งหมดใน transaction เดียว
+    await replaceFacesBatch(faceRows);
 
     saveBranchLocal(r.branch);
 
-    for(const x of r.employees||[]){
-      const t=x.faceTemplate,home=x.home;
-      const c=Object.assign({},x);
-      delete c.faceTemplate;delete c.home;
-      saveCred(c);
-      if(t)await facePut({
-        userId:String(t.userId).toUpperCase(),
-        descriptors:t.descriptors||[],
-        version:t.version||'',
-        updatedAt:t.updatedAt||new Date().toISOString()
-      });
-      if(home)saveHome(x.userId,home);
-    }
-
+    // ปิด session หลังเตรียมข้อมูลครบ
     try{await api('logout',l.token)}catch(e){}
 
     await reloadEmployees();
     closePrepare();
 
-    const pinCount=Object.values(creds()).filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now()).length;
+    const pinCount=credRows.filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now()).length;
     setMain(
       'เตรียมเครื่องสำเร็จ',
       `${r.branch?.name||branchCode} · Face ${state.employees.length} คน · PIN สำรอง ${pinCount} คน`
