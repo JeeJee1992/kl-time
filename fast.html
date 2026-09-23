@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V3.8</title>
+<title>KL TIME FAST KIOSK · V3.9</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -32,7 +32,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK</h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V3.9</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -77,7 +77,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 </div></div>
 
 <div id="prepareModal" class="modal"><div class="modal-card">
-  <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:19px">เตรียม Fast Kiosk</b><button class="btn" onclick="closePrepare()">ปิด</button></div>
+  <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:19px">เตรียม Fast Kiosk</b><button id="prepareClose" class="btn" onclick="closePrepare()">ปิด</button></div>
   <div class="notice warn">ทำครั้งแรกและเมื่อข้อมูลพนักงาน/ใบหน้าเปลี่ยน ต้องออนไลน์</div>
   <div class="field"><label>รหัส OWNER / บัญชี</label><input id="adminUid" autocomplete="username"></div>
   <div class="field"><label>PIN</label><input id="adminPin" type="password" inputmode="numeric"></div>
@@ -87,7 +87,8 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
       <option value="">กำลังโหลดสาขา...</option>
     </select>
   </div>
-  <button class="btn dark" style="width:100%" onclick="prepareDevice()">ดาวน์โหลดพนักงานและใบหน้า</button>
+  <div id="prepareStatus" class="notice" style="display:none;margin-bottom:10px"></div>
+  <button id="prepareSubmit" class="btn dark" style="width:100%" onclick="prepareDevice()">ดาวน์โหลดพนักงานและใบหน้า</button>
 </div></div>
 
 <div id="fallbackModal" class="modal"><div class="modal-card">
@@ -104,7 +105,12 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
   <button id="fallbackSubmit" class="btn dark" style="width:100%;margin-top:10px" onclick="submitFallback()">ยืนยันด้วย PIN สำรอง</button>
 </div></div>
 
-<div id="loader" class="loader"><div class="spinner"></div></div>
+<div id="loader" class="loader">
+  <div style="display:grid;place-items:center;gap:12px;text-align:center">
+    <div class="spinner"></div>
+    <div id="loaderText" style="font-weight:900;color:#374151">กำลังประมวลผล...</div>
+  </div>
+</div>
 
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
@@ -135,16 +141,82 @@ const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
   stream:null,models:false,employees:[],gps:null,gpsWatch:null,
   scanning:false,paused:false,lastNoFaceAt:0,serverEpoch:0,serverPerf:0,
-  cooldown:{},queueSyncing:false,branch:null
+  cooldown:{},queueSyncing:false,branch:null,preparing:false
 };
 
 function backendUrl(){return String(window.KL_BACKEND_URL||'').trim()}
 function trustedGoogleOrigin(origin){try{const h=new URL(origin).hostname;return h==='script.google.com'||h==='script.googleusercontent.com'||h.endsWith('.googleusercontent.com')}catch(e){return false}}
 function decodeRpcB64(s){s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const raw=atob(s),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));return JSON.parse(new TextDecoder().decode(bytes))}
 const rpcPending=new Map();
-window.addEventListener('message',ev=>{if(!trustedGoogleOrigin(ev.origin))return;const d=ev.data;if(!d||d.type!=='KL_RPC_B64')return;let msg;try{msg=decodeRpcB64(d.data)}catch(e){return}const p=rpcPending.get(msg.id);if(!p)return;clearTimeout(p.timer);rpcPending.delete(msg.id);setTimeout(()=>p.iframe&&p.iframe.remove(),200);loader(false);msg.ok?p.resolve(msg.result):p.reject(new Error(msg.error&&msg.error.message?msg.error.message:'Server error'))});
-function api(fn,...args){if(!navigator.onLine)return Promise.reject(new Error('OFFLINE'));const url=backendUrl();if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/.test(url))return Promise.reject(new Error('ยังไม่ได้ตั้ง Backend URL'));loader(true);return new Promise((resolve,reject)=>{const id='rpc_'+Date.now()+'_'+Math.random().toString(36).slice(2),frame=document.createElement('iframe');frame.name='f_'+id;frame.style.display='none';document.body.appendChild(frame);const timer=setTimeout(()=>{rpcPending.delete(id);frame.remove();loader(false);reject(new Error('Server ตอบกลับช้า'))},25000);rpcPending.set(id,{resolve,reject,timer,iframe:frame});const form=document.createElement('form');form.method='POST';form.action=url;form.target=frame.name;form.style.display='none';const add=(n,v)=>{const x=document.createElement('textarea');x.name=n;x.value=v;form.appendChild(x)};add('requestId',id);add('payload',JSON.stringify({id,action:fn,args}));document.body.appendChild(form);form.submit();form.remove()})}
-function loader(v){$('#loader').classList.toggle('show',!!v)}
+let loaderDepth=0;
+function setLoaderText(text){
+  const el=$('#loaderText');
+  if(el&&text)el.textContent=text;
+}
+function loader(v,text){
+  if(v){
+    loaderDepth++;
+    if(loaderDepth===1&&!text)setLoaderText('กำลังประมวลผล...');
+    if(text)setLoaderText(text);
+  }else{
+    loaderDepth=Math.max(0,loaderDepth-1);
+    if(loaderDepth===0)setLoaderText('กำลังประมวลผล...');
+  }
+  $('#loader').classList.toggle('show',loaderDepth>0);
+}
+window.addEventListener('message',ev=>{
+  if(!trustedGoogleOrigin(ev.origin))return;
+  const d=ev.data;
+  if(!d||d.type!=='KL_RPC_B64')return;
+  let msg;
+  try{msg=decodeRpcB64(d.data)}catch(e){return}
+  const p=rpcPending.get(msg.id);
+  if(!p)return;
+  clearTimeout(p.timer);
+  rpcPending.delete(msg.id);
+  setTimeout(()=>p.iframe&&p.iframe.remove(),200);
+  if(p.showLoader)loader(false);
+  msg.ok?p.resolve(msg.result):p.reject(new Error(msg.error&&msg.error.message?msg.error.message:'Server error'));
+});
+function rpcCall(fn,args,showLoader=true,timeoutMs=25000){
+  if(!navigator.onLine)return Promise.reject(new Error('OFFLINE'));
+  const url=backendUrl();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/.test(url))return Promise.reject(new Error('ยังไม่ได้ตั้ง Backend URL'));
+  if(showLoader)loader(true);
+  return new Promise((resolve,reject)=>{
+    const id='rpc_'+Date.now()+'_'+Math.random().toString(36).slice(2),
+          frame=document.createElement('iframe');
+    frame.name='f_'+id;
+    frame.style.display='none';
+    document.body.appendChild(frame);
+
+    const timer=setTimeout(()=>{
+      rpcPending.delete(id);
+      frame.remove();
+      if(showLoader)loader(false);
+      reject(new Error('Server ตอบกลับช้า'));
+    },timeoutMs);
+
+    rpcPending.set(id,{resolve,reject,timer,iframe:frame,showLoader});
+
+    const form=document.createElement('form');
+    form.method='POST';form.action=url;form.target=frame.name;form.style.display='none';
+    const add=(n,v)=>{const x=document.createElement('textarea');x.name=n;x.value=v;form.appendChild(x)};
+    add('requestId',id);
+    add('payload',JSON.stringify({id,action:fn,args}));
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  });
+}
+function api(fn,...args){return rpcCall(fn,args,true,25000)}
+function apiSilent(fn,...args){return rpcCall(fn,args,false,12000)}
+function withTimeout(promise,ms,message){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(message||'ทำรายการนานเกินกำหนด')),ms))
+  ]);
+}
 
 function deviceId(){let v=localStorage.getItem(DEVICE_KEY);if(!v){v='kiosk_'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'_'+Math.random());localStorage.setItem(DEVICE_KEY,v)}return v}
 function savedBranch(){try{return JSON.parse(localStorage.getItem(BRANCH_KEY)||'null')}catch(e){return null}}
@@ -578,6 +650,10 @@ async function submitFallback(){
 
 async function openPrepare(){
   $('#prepareModal').classList.add('show');
+  if(!state.preparing){
+    const s=$('#prepareStatus');
+    if(s){s.style.display='none';s.textContent='';s.className='notice'}
+  }
   try{
     const rows=await api('getPublicBranches');
     const current=savedBranch()?.code||'';
@@ -587,9 +663,36 @@ async function openPrepare(){
     $('#prepareBranch').innerHTML='<option value="">โหลดรายการสาขาไม่ได้</option>';
   }
 }
-function closePrepare(){$('#prepareModal').classList.remove('show')}
+function setPrepareProgress(message,kind){
+  const s=$('#prepareStatus');
+  if(s){
+    s.style.display='block';
+    s.textContent=message||'';
+    s.className='notice'+(kind==='error'?' warn':'');
+  }
+  setLoaderText(message||'กำลังประมวลผล...');
+}
+function setPrepareBusy(busy){
+  state.preparing=!!busy;
+  const submit=$('#prepareSubmit'),close=$('#prepareClose'),
+        branch=$('#prepareBranch'),uid=$('#adminUid'),pin=$('#adminPin');
+  if(submit){
+    submit.disabled=!!busy;
+    submit.textContent=busy?'กำลังเตรียมเครื่อง...':'ดาวน์โหลดพนักงานและใบหน้า';
+  }
+  if(close)close.disabled=!!busy;
+  if(branch)branch.disabled=!!busy;
+  if(uid)uid.disabled=!!busy;
+  if(pin)pin.disabled=!!busy;
+}
+function closePrepare(force){
+  if(state.preparing&&!force)return;
+  $('#prepareModal').classList.remove('show');
+}
 async function prepareDevice(){
+  if(state.preparing)return;
   if(!navigator.onLine){alert('ต้องออนไลน์เพื่อเตรียมเครื่อง');return}
+
   const uid=$('#adminUid').value.trim(),
         pin=$('#adminPin').value.trim(),
         branchCode=$('#prepareBranch').value;
@@ -597,16 +700,20 @@ async function prepareDevice(){
   if(!uid||!pin){alert('กรุณากรอกรหัสและ PIN');return}
   if(!branchCode){alert('กรุณาเลือกสาขาของเครื่อง Kiosk');return}
 
-  try{
-    loader(true);
+  let sessionToken='';
+  setPrepareBusy(true);
+  loader(true,'กำลังตรวจสอบบัญชี...');
+  setPrepareProgress('1/4 กำลังตรวจสอบบัญชี...');
 
-    // งาน local และ login ทำพร้อมกัน เพื่อลดเวลารอ
+  try{
+    // Local queue check and login run together.
     const [pendingRows,l]=await Promise.all([
-      queueAll().catch(()=>[]),
+      withTimeout(queueAll().catch(()=>[]),8000,'อ่านรายการค้างในเครื่องนานเกินไป'),
       api('login',uid,pin)
     ]);
 
     if(!['owner','accounting'].includes(l.user.role))throw new Error('ต้องใช้ OWNER หรือบัญชี');
+    sessionToken=l.token||'';
 
     const pending=pendingRows.filter(x=>x.fastKiosk&&!x.failed);
     const oldBranch=savedBranch();
@@ -614,22 +721,20 @@ async function prepareDevice(){
       throw new Error('มีรายการออฟไลน์รอซิงก์ '+pending.length+' รายการ กรุณาซิงก์ให้หมดก่อนเปลี่ยนสาขาเครื่อง');
     }
 
-    // ถ้า boot โหลด Face model ไว้แล้ว ฟังก์ชันนี้จะคืนค่าทันที
+    setPrepareProgress('2/4 กำลังโหลดข้อมูลพนักงานและใบหน้า...');
     await cacheFaceAssets();
 
-    // Backend call หลักเพียงครั้งเดียวสำหรับข้อมูลพนักงาน/ใบหน้า
-    const r=await api('prepareKioskOfflineBundle',l.token,deviceId(),branchCode);
+    // Main backend request. The outer loader stays visible because loader() is reference counted.
+    const r=await api('prepareKioskOfflineBundle',sessionToken,deviceId(),branchCode);
     const employees=r.employees||[];
 
-    const credRows=[];
-    const faceRows=[];
-    const homeRows=[];
+    setPrepareProgress('3/4 กำลังบันทึกข้อมูลลงเครื่อง...');
 
-    // เตรียมข้อมูลใน memory ก่อน แล้วเขียนลง storage แบบ batch
+    const credRows=[],faceRows=[],homeRows=[];
     for(const x of employees){
-      const c=Object.assign({},x);
-      const t=c.faceTemplate;
-      const home=c.home;
+      const c=Object.assign({},x),
+            t=c.faceTemplate,
+            home=c.home;
       delete c.faceTemplate;
       delete c.home;
 
@@ -645,29 +750,42 @@ async function prepareDevice(){
       }
     }
 
-    // localStorage: เขียน credentials/home อย่างละ 1 ครั้ง
+    // localStorage writes are synchronous and batched.
     replaceCredsBatch(credRows);
     replaceHomesBatch(homeRows);
 
-    // IndexedDB: ล้าง + ใส่ Face ทั้งหมดใน transaction เดียว
-    await replaceFacesBatch(faceRows);
+    // IndexedDB write cannot be allowed to hang forever.
+    await withTimeout(
+      replaceFacesBatch(faceRows),
+      12000,
+      'บันทึกข้อมูลใบหน้าลงเครื่องนานเกินไป กรุณาลองใหม่'
+    );
 
     saveBranchLocal(r.branch);
 
-    // ปิด session หลังเตรียมข้อมูลครบ
-    try{await api('logout',l.token)}catch(e){}
-
-    await reloadEmployees();
-    closePrepare();
+    setPrepareProgress('4/4 กำลังตรวจสอบข้อมูลที่บันทึกแล้ว...');
+    await withTimeout(reloadEmployees(),8000,'ตรวจสอบข้อมูลในเครื่องนานเกินไป');
 
     const pinCount=credRows.filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now()).length;
+
+    // End UI state BEFORE closing modal.
+    setPrepareProgress(`สำเร็จ · ${r.branch?.name||branchCode} · Face ${state.employees.length} คน · PIN ${pinCount} คน`);
     setMain(
       'เตรียมเครื่องสำเร็จ',
       `${r.branch?.name||branchCode} · Face ${state.employees.length} คน · PIN สำรอง ${pinCount} คน`
     );
+
+    setPrepareBusy(false);
+    closePrepare(true);
+
+    // Logout is cleanup only; never block the kiosk-ready state.
+    if(sessionToken)apiSilent('logout',sessionToken).catch(()=>{});
   }catch(e){
-    alert(e.message||String(e));
+    setPrepareProgress(e.message||String(e),'error');
+    setPrepareBusy(false);
   }finally{
+    // This releases ONLY the outer prepare loader.
+    // Nested API calls release their own loader depth separately.
     loader(false);
   }
 }
