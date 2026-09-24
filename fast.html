@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V4.0</title>
+<title>KL TIME FAST KIOSK · V4.1</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -17,7 +17,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 .scanbar{position:absolute;left:25%;right:25%;top:20%;height:2px;background:rgba(255,255,255,.9);box-shadow:0 0 12px rgba(255,255,255,.9);animation:scan 1.7s ease-in-out infinite}
 @keyframes scan{0%,100%{top:22%}50%{top:76%}}
 .overlay{position:absolute;left:12px;right:12px;bottom:12px;background:rgba(17,24,39,.82);color:#fff;border-radius:14px;padding:11px 13px;text-align:center}
-.overlay strong{font-size:18px}.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.status{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:10px;text-align:center;font-size:12px}.status b{display:block;font-size:15px;margin-top:2px}
+.overlay strong{font-size:18px}.status-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}.status{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:10px;text-align:center;font-size:12px}.status b{display:block;font-size:15px;margin-top:2px}
 .green{color:#047857}.red{color:#b91c1c}.amber{color:#b45309}.muted{color:var(--muted)}
 .clock{text-align:center;font-size:38px;font-weight:900;letter-spacing:1px;margin:8px 0 2px}.date{text-align:center;color:var(--muted);font-size:13px;margin-bottom:10px}
 .notice{margin-top:10px;padding:11px 12px;border-radius:12px;background:#f9fafb;border:1px solid var(--line);font-size:13px;line-height:1.5}.notice.warn{background:#fff7ed;border-color:#fdba74;color:#9a3412}
@@ -26,13 +26,13 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 .modal{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:14px;z-index:120}.modal.show{display:grid}.modal-card{width:min(430px,100%);background:#fff;border-radius:20px;padding:18px}.field{margin:10px 0}.field label{display:block;font-weight:800;font-size:13px;margin-bottom:6px}.field input,.field select{width:100%;border:1px solid var(--line);border-radius:11px;padding:11px;background:#fff}
 .loader{position:fixed;inset:0;background:rgba(255,255,255,.75);display:none;place-items:center;z-index:150}.loader.show{display:grid}.spinner{width:42px;height:42px;border-radius:50%;border:5px solid #d1d5db;border-top-color:#374151;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .small{font-size:11px;color:var(--muted)}.queue{font-weight:900;color:#b45309}
-@media(max-width:560px){.wrap{padding:8px}.card{padding:9px;border-radius:16px}.video{border-radius:14px}.guide{inset:8% 18%}.clock{font-size:32px}.status-grid{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:560px){.wrap{padding:8px}.card{padding:9px;border-radius:16px}.video{border-radius:14px}.guide{inset:8% 18%}.clock{font-size:32px}.status-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.0</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.1</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -52,7 +52,6 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 
     <div class="status-grid">
       <div class="status">กล้อง<b id="cameraStatus" class="amber">กำลังเปิด</b></div>
-      <div class="status">GPS<b id="gpsStatus" class="amber">กำลังอ่าน</b></div>
       <div class="status">ใบหน้า<b id="faceStatus" class="amber">กำลังโหลด</b></div>
     </div>
 
@@ -101,7 +100,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
   </div>
   <div class="field"><label>รหัสพนักงาน</label><input id="fallbackUid" autocomplete="off" autocapitalize="characters" placeholder="เช่น PD001"></div>
   <div class="field"><label>PIN</label><input id="fallbackPin" type="password" inputmode="numeric" autocomplete="off"></div>
-  <div id="fallbackStatus" class="notice">GPS ยังต้องอยู่ในพื้นที่บริษัทเหมือนเดิม</div>
+  <div id="fallbackStatus" class="notice">ใช้ PIN สำรองเมื่อสแกนใบหน้าไม่ได้</div>
   <button id="fallbackSubmit" class="btn dark" style="width:100%;margin-top:10px" onclick="submitFallback()">ยืนยันด้วย PIN สำรอง</button>
 </div></div>
 
@@ -136,10 +135,9 @@ const FACE_ASSETS=[
   FACE_MODEL_BASE+'/face_recognition_model-shard2'
 ];
 const FAST_PASS=.50, CONFIRM_MAX=.60, CONFIRM_AVG=.55, SECOND_MARGIN=.06;
-const GPS_MAX_AGE=30000;
 const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
-  stream:null,models:false,employees:[],gps:null,gpsWatch:null,
+  stream:null,models:false,employees:[],
   scanning:false,paused:false,lastNoFaceAt:0,serverEpoch:0,serverPerf:0,
   cooldown:{},queueSyncing:false,branch:null,preparing:false
 };
@@ -353,16 +351,6 @@ async function startCamera(){
   $('#cam').srcObject=state.stream;await $('#cam').play().catch(()=>{});
   $('#cameraStatus').textContent='พร้อม';$('#cameraStatus').className='green';
 }
-function startGps(){
-  if(!navigator.geolocation){$('#gpsStatus').textContent='ไม่รองรับ';$('#gpsStatus').className='red';return}
-  if(state.gpsWatch!==null)return;
-  state.gpsWatch=navigator.geolocation.watchPosition(p=>{
-    state.gps={lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,at:Date.now()};
-    $('#gpsStatus').textContent=Math.round(p.coords.accuracy)+' ม.';
-    $('#gpsStatus').className=p.coords.accuracy<=100?'green':'amber';
-  },()=>{$('#gpsStatus').textContent='ยังไม่ได้';$('#gpsStatus').className='amber'},{enableHighAccuracy:true,maximumAge:30000,timeout:10000});
-}
-function gpsReady(){return state.gps&&Date.now()-state.gps.at<=GPS_MAX_AGE&&Number(state.gps.accuracy)<=100}
 
 function serverNow(){return state.serverEpoch?state.serverEpoch+(performance.now()-state.serverPerf):Date.now()}
 async function syncClock(){try{const r=await api('ping');state.serverEpoch=Number(r.serverEpochMs||Date.now());state.serverPerf=performance.now()}catch(e){}}
@@ -439,55 +427,15 @@ function applyLocalHome(uid,type,time,dateKey){
   if(type==='out'){h.checkOut=time;h.status='รอซิงก์ · ออกงาน'}
   saveHome(uid,h);
 }
-function distanceMetersLocal_(lat1,lng1,lat2,lng2){
-  const R=6371000,toRad=x=>Number(x)*Math.PI/180;
-  const a1=toRad(lat1),a2=toRad(lat2),
-        da=toRad(Number(lat2)-Number(lat1)),
-        dl=toRad(Number(lng2)-Number(lng1));
-  const a=Math.sin(da/2)**2+Math.cos(a1)*Math.cos(a2)*Math.sin(dl/2)**2;
-  return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-}
-function localBranchAreaCheck(){
-  const b=state.branch;
-  if(!b)return {ok:false,message:'เครื่องยังไม่ได้ผูกสาขา กรุณาเตรียมเครื่องใหม่'};
-  if(b.lat===''||b.lat==null||b.lng===''||b.lng==null){
-    return {ok:false,message:'สาขา '+(b.name||b.code||'')+' ยังไม่ได้ตั้งพิกัด GPS'};
-  }
-  const lat=Number(b.lat),lng=Number(b.lng),radius=Number(b.radiusM||100);
-  if(!Number.isFinite(lat)||!Number.isFinite(lng)){
-    return {ok:false,message:'พิกัดสาขาไม่ถูกต้อง กรุณาให้ OWNER ตรวจการตั้งค่าสาขา'};
-  }
-  const distance=distanceMetersLocal_(state.gps.lat,state.gps.lng,lat,lng);
-  if(distance>radius){
-    return {
-      ok:false,
-      distance:distance,
-      radius:radius,
-      message:'อยู่นอกพื้นที่ '+(b.name||b.code||'')+
-        ' ระยะประมาณ '+Math.round(distance)+' เมตร (อนุญาต '+radius+
-        ' เมตร) · GPS เครื่องแม่นประมาณ '+Math.round(Number(state.gps.accuracy||0))+
-        ' เมตร · กรุณาตรวจพิกัดสาขา'
-    };
-  }
-  return {ok:true,distance:distance,radius:radius};
-}
 
 async function punch(user,proof){
   const uid=user.userId;
   if(state.cooldown[uid]&&Date.now()<state.cooldown[uid])return;
-  if(!gpsReady()){setMain('พบ '+user.name+' แล้ว','กำลังรอ GPS ให้พร้อม');return}
 
   const cred=creds()[uid];
   if(!cred){showFail('เครื่องยังไม่มีสิทธิ์ของ '+user.name);return}
   if(new Date(cred.expiresAt).getTime()<Date.now()){
     showFail('สิทธิ์ Fast Kiosk หมดอายุ กรุณาเตรียมเครื่องใหม่');
-    return;
-  }
-
-  // ตรวจรัศมีที่เครื่องทันที ไม่ต้องรอ Apps Script
-  const area=localBranchAreaCheck();
-  if(!area.ok){
-    showFail(area.message);
     return;
   }
 
@@ -511,14 +459,14 @@ async function punch(user,proof){
     const ev={
       kiosk:true,fastKiosk:true,eventId,userId:uid,type:type,lockedAt:lock,
       localDate:localDate,
-      lat:state.gps.lat,lng:state.gps.lng,accuracy:state.gps.accuracy,
+      lat:'',lng:'',accuracy:'',
       photoDataUrl:photo,faceProof:proof,device:navigator.userAgent,
       deviceId:deviceId(),permit:cred.permit,
       branchCode:state.branch?.code||'',
-      createdAt:new Date().toISOString(),failed:false
+      createdAt:new Date().toISOString(),failed:false,noGps:true
     };
 
-    // QUEUE FIRST: บันทึกลงเครื่องก่อน แล้วปล่อยพนักงานคนถัดไปทันที
+    // บันทึกเข้าคิวในเครื่องก่อน พนักงานคนถัดไปสแกนต่อได้ทันที
     await queuePut(ev);
     applyLocalHome(uid,type,t,localDate);
     state.cooldown[uid]=Date.now()+30000;
@@ -526,7 +474,6 @@ async function punch(user,proof){
     showSuccess(user,type,t,true,'เข้าคิวบันทึกแล้ว');
     updateDeviceInfo();
 
-    // ซิงก์ Google Sheet เบื้องหลัง ไม่บังหน้าสแกนและไม่ให้พนักงานรอ
     if(navigator.onLine){
       setTimeout(()=>syncQueue(false),0);
     }
@@ -600,7 +547,6 @@ function updateDeviceInfo(){
 
     $('#deviceInfo').innerHTML=
       `สาขา <b>${esc(state.branch?.name||'ยังไม่กำหนด')}</b> · `+
-      `รัศมี <b>${esc(state.branch?.radiusM||'-')} ม.</b> · `+
       `เครื่อง <b>${esc(deviceId().slice(-10))}</b> · `+
       `Face <b>${state.employees.length}</b> คน · `+
       `PIN สำรอง <b>${validCreds.length}</b> คน · `+
@@ -614,9 +560,7 @@ function openFallback(){
   state.paused=true;
   $('#fallbackUid').value='';
   $('#fallbackPin').value='';
-  $('#fallbackStatus').textContent=gpsReady()
-    ? 'GPS พร้อม · ระบบจะล็อกเวลาทันทีเมื่อกดยืนยัน'
-    : 'กำลังรอ GPS · ต้องแม่นไม่เกิน 100 เมตร';
+  $('#fallbackStatus').textContent='กรอกรหัสพนักงานและ PIN สำรอง';
   $('#fallbackModal').classList.add('show');
   setTimeout(()=>$('#fallbackUid').focus(),100);
 }
@@ -653,11 +597,6 @@ async function submitFallback(){
   // ล็อกเวลาตั้งแต่วินาทีที่พนักงานกดยืนยัน ไม่รอ Server / กล้อง / PIN hash
   const lock=lockedIso();
 
-  if(!gpsReady()){
-    s.textContent='GPS ยังไม่พร้อม กรุณารอสักครู่';
-    return;
-  }
-
   b.disabled=true;
   s.textContent='กำลังตรวจ PIN...';
 
@@ -674,7 +613,7 @@ async function submitFallback(){
       kiosk:true,fastKiosk:true,fallbackPin:true,eventId,userId:uid,type:'',
       lockedAt:lock,
       localDate:new Date(lock).toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}),
-      lat:state.gps.lat,lng:state.gps.lng,accuracy:state.gps.accuracy,
+      lat:'',lng:'',accuracy:'',noGps:true,
       photoDataUrl:photo,
       device:navigator.userAgent,deviceId:deviceId(),
       permit:c.permit,branchCode:state.branch?.code||'',createdAt:new Date().toISOString(),failed:false,
@@ -698,7 +637,7 @@ async function submitFallback(){
       }
     }
 
-    const type=inferOfflineType(uid);
+    const type=inferOfflineType(uid,bangkokDateKey(lock));
     if(type==='done')throw new Error('วันนี้ลงเวลาเข้าและออกครบแล้ว');
     ev.type=type;
     await queuePut(ev);
@@ -706,7 +645,7 @@ async function submitFallback(){
     const t=new Date(lock).toLocaleTimeString('th-TH',{
       hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
     });
-    applyLocalHome(uid,type,t);
+    applyLocalHome(uid,type,t,bangkokDateKey(lock));
     state.cooldown[uid]=Date.now()+30000;
     closeFallback();
     showSuccess(user,type,t,true,'PIN สำรอง');
@@ -909,16 +848,15 @@ async function boot(){
   const tick=()=>{$('#clock').textContent=new Date(serverNow()).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})};
   tick();setInterval(tick,1000);
   $('#date').textContent=new Date().toLocaleDateString('th-TH',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  setMain('กำลังเตรียมระบบ','เปิดกล้อง โหลดใบหน้า และจับ GPS');
-  startGps();
+  setMain('กำลังเตรียมระบบ','เปิดกล้องและโหลดใบหน้า');
   try{await syncClock()}catch(e){}
   try{await startCamera()}catch(e){
     $('#cameraStatus').textContent='ใช้ไม่ได้';$('#cameraStatus').className='red';
-    setMain('กล้องมีปัญหา','ยังใช้ “รหัสสำรอง” ได้ ถ้า GPS พร้อม');
+    setMain('กล้องมีปัญหา','ยังใช้ “รหัสสำรอง” ได้');
   }
   try{await loadModels()}catch(e){
     $('#faceStatus').textContent='ใช้ไม่ได้';$('#faceStatus').className='red';
-    setMain('Face มีปัญหา','ยังใช้ “รหัสสำรอง” ได้ ถ้า GPS พร้อม');
+    setMain('Face มีปัญหา','ยังใช้ “รหัสสำรอง” ได้');
   }
   await reloadEmployees();
   if(!state.branch||!state.employees.length){
