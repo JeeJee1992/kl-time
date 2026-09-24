@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V4.2</title>
+<title>KL TIME FAST KIOSK · V4.3</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -32,7 +32,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.2</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.3</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -128,6 +128,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&
 const DEVICE_KEY='kl_kiosk_device_v4';
 const CRED_KEY='kl_kiosk_offline_credentials_branch_v1';
 const STATUS_KEY='kl_fast_kiosk_status_branch_v1';
+const STATUS_SCHEMA_KEY='kl_fast_kiosk_status_schema_v43';
 const QUEUE_DB='kl_time_offline_v2';
 const QUEUE_STORE='attendance_queue_branch_v1';
 const FACE_STORE='face_templates_branch_v1';
@@ -148,7 +149,7 @@ const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
   stream:null,models:false,employees:[],
   scanning:false,paused:false,lastNoFaceAt:0,serverEpoch:0,serverPerf:0,
-  cooldown:{},queueSyncing:false,branch:null,preparing:false
+  cooldown:{},queueSyncing:false,branch:null,preparing:false,reconciling:false,lastReconciledAt:0
 };
 
 function backendUrl(){return String(window.KL_BACKEND_URL||'').trim()}
@@ -278,18 +279,28 @@ async function verifyLocalFallbackPin(uid,pin){
 }
 
 function statusMap(){try{return JSON.parse(localStorage.getItem(STATUS_KEY)||'{}')}catch(e){return {}}}
-function saveHome(uid,home){const m=statusMap();m[String(uid).toUpperCase()]={home,savedAt:new Date().toISOString()};localStorage.setItem(STATUS_KEY,JSON.stringify(m))}
-function replaceHomesBatch(items){
-  const m={};
-  const now=new Date().toISOString();
+function statusEntry(uid){return statusMap()[String(uid).toUpperCase()]||null}
+function saveHome(uid,home,source='server'){
+  const m=statusMap();
+  m[String(uid).toUpperCase()]={home:home,source:source,savedAt:new Date().toISOString()};
+  localStorage.setItem(STATUS_KEY,JSON.stringify(m));
+}
+function replaceHomesBatch(items,source='server'){
+  const m={},now=new Date().toISOString();
   for(const x of items||[]){
     if(!x||!x.userId||!x.home)continue;
-    m[String(x.userId).toUpperCase()]={home:x.home,savedAt:now};
+    m[String(x.userId).toUpperCase()]={home:x.home,source:source,savedAt:now};
   }
   localStorage.setItem(STATUS_KEY,JSON.stringify(m));
 }
-function getHome(uid){const x=statusMap()[String(uid).toUpperCase()];return x&&x.home||null}
-
+function getHome(uid){const x=statusEntry(uid);return x&&x.home||null}
+function migrateStatusCacheV43(){
+  if(localStorage.getItem(STATUS_SCHEMA_KEY)==='1')return;
+  // V4.2 and older could leave a stale "IN+OUT complete" home in LocalStorage.
+  // Clear only the derived home cache; Offline Queue / Face / PIN are untouched.
+  localStorage.removeItem(STATUS_KEY);
+  localStorage.setItem(STATUS_SCHEMA_KEY,'1');
+}
 function idbOpen(){return new Promise((resolve,reject)=>{const q=indexedDB.open(FACE_DB,4);q.onupgradeneeded=()=>{const d=q.result;if(!d.objectStoreNames.contains(QUEUE_STORE)){const s=d.createObjectStore(QUEUE_STORE,{keyPath:'eventId'});s.createIndex('userId','userId',{unique:false})}if(!d.objectStoreNames.contains(FACE_STORE))d.createObjectStore(FACE_STORE,{keyPath:'userId'})};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
 async function facePut(x){const d=await idbOpen();return new Promise((res,rej)=>{const tx=d.transaction(FACE_STORE,'readwrite');tx.objectStore(FACE_STORE).put(x);tx.oncomplete=()=>{d.close();res(x)};tx.onerror=()=>{d.close();rej(tx.error)}})}
 async function faceAll(){const d=await idbOpen();return new Promise((res,rej)=>{const r=d.transaction(FACE_STORE,'readonly').objectStore(FACE_STORE).getAll();r.onsuccess=()=>{const x=r.result||[];d.close();res(x)};r.onerror=()=>{d.close();rej(r.error)}})}
@@ -418,25 +429,129 @@ function bangkokDateKey(iso){
   const d=iso?new Date(iso):new Date();
   return d.toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'});
 }
-function inferOfflineType(uid,dateKey){
-  dateKey=dateKey||bangkokDateKey();
+function eventTimeText_(ev){
+  const d=new Date(ev.lockedAt||ev.createdAt||Date.now());
+  return d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+}
+function baseHomeForToday_(uid,dateKey){
   const h=getHome(uid);
-  if(!h||String(h.date||'')!==dateKey||!h.checkIn)return 'in';
+  if(h&&String(h.date||'')===dateKey)return Object.assign({},h);
+  return {date:dateKey,checkIn:'',checkOut:'',lateMinutes:0,status:'ยังไม่ลงเวลา'};
+}
+function applyPendingEventsToHome_(home,events){
+  const h=Object.assign({},home);
+  const rows=(events||[]).slice().sort((a,b)=>new Date(a.lockedAt||0)-new Date(b.lockedAt||0));
+  for(const ev of rows){
+    if(ev.type==='in'&&!h.checkIn){
+      h.checkIn=eventTimeText_(ev);
+      h.status='รอส่ง · เข้างาน';
+    }else if(ev.type==='out'&&h.checkIn&&!h.checkOut){
+      h.checkOut=eventTimeText_(ev);
+      h.status='รอส่ง · ออกงาน';
+    }
+  }
+  return h;
+}
+async function pendingForUserToday_(uid,dateKey){
+  const all=await queueAll().catch(()=>[]);
+  return all.filter(x=>
+    x.fastKiosk&&!x.failed&&
+    normUid(x.userId)===normUid(uid)&&
+    String(x.localDate||bangkokDateKey(x.lockedAt))===dateKey
+  );
+}
+async function effectiveHome_(uid,dateKey){
+  const base=baseHomeForToday_(uid,dateKey);
+  const pending=await pendingForUserToday_(uid,dateKey);
+  return applyPendingEventsToHome_(base,pending);
+}
+async function resolveAttendanceType_(uid,dateKey){
+  const h=await effectiveHome_(uid,dateKey);
+  if(!h.checkIn)return 'in';
   if(!h.checkOut)return 'out';
   return 'done';
 }
 function applyLocalHome(uid,type,time,dateKey){
   dateKey=dateKey||bangkokDateKey();
-  let h=getHome(uid);
-  if(!h||String(h.date||'')!==dateKey){
-    h={date:dateKey,checkIn:'',checkOut:'',status:'ยังไม่ลงเวลา'};
-  }
+  let h=baseHomeForToday_(uid,dateKey);
   h.date=dateKey;
-  if(type==='in'){h.checkIn=time;h.status='รอซิงก์ · เข้างาน'}
-  if(type==='out'){h.checkOut=time;h.status='รอซิงก์ · ออกงาน'}
-  saveHome(uid,h);
+  if(type==='in'){h.checkIn=time;h.status='รอส่ง · เข้างาน'}
+  if(type==='out'){h.checkOut=time;h.status='รอส่ง · ออกงาน'}
+  saveHome(uid,h,'queue');
 }
+function firstValidKioskCredential_(){
+  const now=Date.now(),branchCode=String(state.branch?.code||'').toUpperCase();
+  return Object.values(creds()).find(c=>
+    c&&c.permit&&String(c.deviceId||'')===deviceId()&&
+    new Date(c.expiresAt).getTime()>now&&
+    branchCode
+  )||null;
+}
+async function reconcileTodayFromServer(){
+  if(state.reconciling||!navigator.onLine||!state.branch)return false;
+  const c=firstValidKioskCredential_();
+  if(!c)return false;
 
+  state.reconciling=true;
+  try{
+    const r=await apiSilent(
+      'getKioskTodayStatusBundle',
+      c.permit,
+      deviceId(),
+      state.branch.code
+    );
+
+    if(r.serverEpochMs){
+      state.serverEpoch=Number(r.serverEpochMs);
+      state.serverPerf=performance.now();
+    }
+
+    const dateKey=String(r.date||bangkokDateKey()),
+          allQueue=await queueAll().catch(()=>[]),
+          pending=allQueue.filter(x=>
+            x.fastKiosk&&!x.failed&&
+            String(x.localDate||bangkokDateKey(x.lockedAt))===dateKey
+          ),
+          qByUser={};
+
+    pending.forEach(x=>{
+      const uid=normUid(x.userId);
+      (qByUser[uid]||(qByUser[uid]=[])).push(x);
+    });
+
+    for(const row of r.rows||[]){
+      const uid=normUid(row.userId);
+      const base={
+        date:dateKey,
+        checkIn:row.checkIn||'',
+        checkOut:row.checkOut||'',
+        lateMinutes:Number(row.lateMinutes||0),
+        status:row.status||'ยังไม่ลงเวลา'
+      };
+      const effective=applyPendingEventsToHome_(base,qByUser[uid]||[]);
+      saveHome(uid,effective,(qByUser[uid]||[]).length?'mixed':'server');
+    }
+
+    state.lastReconciledAt=Date.now();
+    return true;
+  }finally{
+    state.reconciling=false;
+  }
+}
+function isAttendanceStateConflict_(msg){
+  const m=String(msg||'');
+  return m.includes('มีเวลาเข้างานอยู่แล้ว')||
+         m.includes('มีเวลาออกงานอยู่แล้ว')||
+         m.includes('ลงเวลาเข้าและออกครบแล้ว')||
+         m.includes('ยังไม่มีเวลาเข้างาน');
+}
+async function queueEventAlreadyReflected_(ev){
+  const h=getHome(ev.userId);
+  if(!h||String(h.date||'')!==String(ev.localDate||bangkokDateKey(ev.lockedAt)))return false;
+  if(ev.type==='in')return !!h.checkIn;
+  if(ev.type==='out')return !!h.checkOut;
+  return false;
+}
 async function punch(user,proof){
   const uid=user.userId;
   if(state.cooldown[uid]&&Date.now()<state.cooldown[uid])return;
@@ -448,9 +563,19 @@ async function punch(user,proof){
     return;
   }
 
+  // Lock the face-scan time immediately. Server checks must never change this timestamp.
   const lock=lockedIso(),
-        localDate=bangkokDateKey(lock),
-        type=inferOfflineType(uid,localDate);
+        localDate=bangkokDateKey(lock);
+
+  let type=await resolveAttendanceType_(uid,localDate);
+
+  // A cached "done" state is the only case where we briefly confirm with Sheet.
+  // Normal IN/OUT never waits for Server.
+  if(type==='done'&&navigator.onLine){
+    setMain('กำลังตรวจสถานะของ '+user.name,'ตรวจข้อมูลจริงจากระบบก่อนปฏิเสธการลงเวลา');
+    await withTimeout(reconcileTodayFromServer(),5000,'ตรวจสถานะนานเกินไป').catch(()=>false);
+    type=await resolveAttendanceType_(uid,localDate);
+  }
 
   if(type==='done'){
     showFail('วันนี้ลงเวลาเข้าและออกครบแล้ว');
@@ -475,7 +600,6 @@ async function punch(user,proof){
       createdAt:new Date().toISOString(),failed:false,noGps:true
     };
 
-    // บันทึกเข้าคิวในเครื่องก่อน พนักงานคนถัดไปสแกนต่อได้ทันที
     await queuePut(ev);
     applyLocalHome(uid,type,t,localDate);
     state.cooldown[uid]=Date.now()+30000;
@@ -483,9 +607,7 @@ async function punch(user,proof){
     showSuccess(user,type,t,true,'เข้าคิวบันทึกแล้ว');
     updateDeviceInfo();
 
-    if(navigator.onLine){
-      setTimeout(()=>syncQueue(false),0);
-    }
+    if(navigator.onLine)setTimeout(()=>syncQueue(false),0);
   }catch(e){
     showFail(e.message||String(e));
   }
@@ -717,7 +839,12 @@ async function submitFallback(){
       }
     }
 
-    const type=inferOfflineType(uid,bangkokDateKey(lock));
+    const localDate=bangkokDateKey(lock);
+    let type=await resolveAttendanceType_(uid,localDate);
+    if(type==='done'&&navigator.onLine){
+      await withTimeout(reconcileTodayFromServer(),5000,'ตรวจสถานะนานเกินไป').catch(()=>false);
+      type=await resolveAttendanceType_(uid,localDate);
+    }
     if(type==='done')throw new Error('วันนี้ลงเวลาเข้าและออกครบแล้ว');
     ev.type=type;
     await queuePut(ev);
@@ -725,7 +852,7 @@ async function submitFallback(){
     const t=new Date(lock).toLocaleTimeString('th-TH',{
       hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
     });
-    applyLocalHome(uid,type,t,bangkokDateKey(lock));
+    applyLocalHome(uid,type,t,localDate);
     state.cooldown[uid]=Date.now()+30000;
     closeFallback();
     showSuccess(user,type,t,true,'PIN สำรอง');
@@ -882,33 +1009,58 @@ async function syncQueue(show){
   state.queueSyncing=true;
   let ok=0;
   try{
-    const rows=(await queueAll()).filter(x=>x.fastKiosk&&!x.failed);
+    const rows=(await queueAll())
+      .filter(x=>x.fastKiosk&&!x.failed)
+      .sort((a,b)=>new Date(a.lockedAt||0)-new Date(b.lockedAt||0));
+
     for(const ev of rows){
       try{
         const fn=ev.fallbackPin?'syncFallbackPinOffline':'syncKioskOffline';
         const r=show?await api(fn,ev):await apiSilent(fn,ev);
-        if(r.home)saveHome(ev.userId,r.home);
+
+        if(r.home)saveHome(ev.userId,r.home,'server');
         await queueDelete(ev.eventId);
         ok++;
       }catch(e){
         const m=String(e.message||'');
+
         if(m.includes('Server ตอบกลับช้า')||m.includes('OFFLINE')){
           break;
         }
-        // Error ถาวร: เก็บไว้ให้ตรวจสอบย้อนหลัง แต่ไม่วนยิงซ้ำไม่จบ
+
+        if(isAttendanceStateConflict_(m)){
+          await reconcileTodayFromServer().catch(()=>false);
+
+          if(await queueEventAlreadyReflected_(ev)){
+            // Sheet already contains the effective state: this local item is redundant.
+            await queueDelete(ev.eventId);
+            ok++;
+            continue;
+          }
+
+          ev.retryCount=Number(ev.retryCount||0)+1;
+          ev.syncError=m;
+          if(ev.retryCount>=3)ev.failed=true;
+          await queuePut(ev);
+          break;
+        }
+
         ev.failed=true;
         ev.syncError=m;
         await queuePut(ev);
       }
     }
 
+    // Final lightweight reconciliation keeps LocalStorage equal to Sheet + pending queue.
+    if(ok)await reconcileTodayFromServer().catch(()=>false);
+
     if(show){
       const all=await queueAll();
       const pending=all.filter(x=>x.fastKiosk&&!x.failed).length;
       const failed=all.filter(x=>x.fastKiosk&&x.failed).length;
       alert(ok
-        ? 'ซิงก์สำเร็จ '+ok+' รายการ · ค้าง '+pending+' · มีปัญหา '+failed
-        : 'ยังไม่มีรายการที่ซิงก์สำเร็จ · ค้าง '+pending+' · มีปัญหา '+failed);
+        ? 'ส่งสำเร็จ '+ok+' รายการ · รอส่ง '+pending+' · มีปัญหา '+failed
+        : 'ยังไม่มีรายการที่ส่งสำเร็จ · รอส่ง '+pending+' · มีปัญหา '+failed);
     }
   }finally{
     state.queueSyncing=false;
@@ -919,36 +1071,61 @@ function updateNet(){
   $('#net').textContent=navigator.onLine?'● ออนไลน์':'● ออฟไลน์';
   $('#net').className='pill '+(navigator.onLine?'':'off');
 }
-window.addEventListener('online',()=>{updateNet();syncClock();syncQueue(false)});
+window.addEventListener('online',()=>{updateNet();syncClock();reconcileTodayFromServer().catch(()=>false);syncQueue(false)});
 window.addEventListener('offline',updateNet);
 
 async function boot(){
+  migrateStatusCacheV43();
   state.branch=savedBranch();
   updateNet();
-  const tick=()=>{$('#clock').textContent=new Date(serverNow()).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})};
+
+  const reconcilePromise=(state.branch&&navigator.onLine)
+    ? reconcileTodayFromServer().catch(()=>false)
+    : Promise.resolve(false);
+
+  const tick=()=>{
+    $('#clock').textContent=new Date(serverNow()).toLocaleTimeString('th-TH',{
+      hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+    })
+  };
   tick();setInterval(tick,1000);
-  $('#date').textContent=new Date().toLocaleDateString('th-TH',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  $('#date').textContent=new Date().toLocaleDateString('th-TH',{
+    weekday:'long',day:'numeric',month:'long',year:'numeric'
+  });
+
   setMain('กำลังเตรียมระบบ','เปิดกล้องและโหลดใบหน้า');
   try{await syncClock()}catch(e){}
+
   try{await startCamera()}catch(e){
     $('#cameraStatus').textContent='ใช้ไม่ได้';$('#cameraStatus').className='red';
     setMain('กล้องมีปัญหา','ยังใช้ “รหัสสำรอง” ได้');
   }
+
   try{await loadModels()}catch(e){
     $('#faceStatus').textContent='ใช้ไม่ได้';$('#faceStatus').className='red';
     setMain('Face มีปัญหา','ยังใช้ “รหัสสำรอง” ได้');
   }
+
   await reloadEmployees();
+
   if(!state.branch||!state.employees.length){
     setMain('ยังไม่ได้เตรียมเครื่อง','เลือกสาขาแล้วกด “เตรียมเครื่อง / อัปเดตพนักงาน”');
     openPrepare();
   }else{
+    // Usually reconciliation already finished while camera/Face models were loading.
+    await withTimeout(reconcilePromise,4500,'').catch(()=>false);
+
     if(state.models&&state.stream)setMain('พร้อมรับพนักงาน','เดินเข้ากรอบทีละ 1 คน');
     else setMain('Face ยังไม่พร้อม','ใช้ปุ่ม “ใช้รหัสสำรอง” ได้');
   }
+
   await recoverLegacyGpsFailures().catch(()=>0);
   syncQueue(false);
+
+  // Queue sync stays fast; authoritative status refresh is a separate light heartbeat.
   setInterval(()=>{if(navigator.onLine)syncQueue(false)},15000);
+  setInterval(()=>{if(navigator.onLine)reconcileTodayFromServer().catch(()=>false)},60000);
+
   scanLoop();
 }
 boot();
