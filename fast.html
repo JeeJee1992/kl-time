@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V4.4</title>
+<title>KL TIME FAST KIOSK · V4.5</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -22,7 +22,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 .clock{text-align:center;font-size:38px;font-weight:900;letter-spacing:1px;margin:8px 0 2px}.date{text-align:center;color:var(--muted);font-size:13px;margin-bottom:10px}
 .notice{margin-top:10px;padding:11px 12px;border-radius:12px;background:#f9fafb;border:1px solid var(--line);font-size:13px;line-height:1.5}.notice.warn{background:#fff7ed;border-color:#fdba74;color:#9a3412}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.btn{border:0;border-radius:11px;padding:10px 13px;font-weight:800;background:#e5e7eb;color:#111827;cursor:pointer}.btn.dark{background:var(--dark);color:#fff}.btn.red{background:#fee2e2;color:#991b1b}
-.result{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:16px;z-index:100}.result.show{display:grid}.result-card{width:min(430px,100%);background:#fff;border-radius:22px;padding:24px;text-align:center}.result-icon{font-size:58px}.result-name{font-size:24px;font-weight:900}.result-time{font-size:38px;font-weight:900;margin:8px 0}.result-in{color:#047857}.result-out{color:#b91c1c}
+.result{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:16px;z-index:100}.result.show{display:grid}.result-card{width:min(430px,100%);background:#fff;border-radius:22px;padding:24px;text-align:center}.result-icon{font-size:58px}.result-name{font-size:24px;font-weight:900}.result-time{font-size:38px;font-weight:900;margin:8px 0}.result-in{color:#047857}.result-out{color:#b91c1c}.result.toast{inset:auto 10px 10px 10px;background:transparent;padding:0;place-items:end center;pointer-events:none}.result.toast .result-card{width:min(390px,100%);border-radius:16px;padding:11px 14px;box-shadow:0 10px 28px rgba(17,24,39,.20);display:grid;grid-template-columns:auto 1fr auto;column-gap:10px;align-items:center;text-align:left}.result.toast .result-icon{font-size:28px;grid-row:1/4}.result.toast .result-name{font-size:17px}.result.toast #resultAction{font-size:13px!important;margin-top:0!important}.result.toast .result-time{font-size:22px;margin:0;grid-column:3;grid-row:1/3}.result.toast #resultExtra{font-size:11px;grid-column:2/4}
 .modal{position:fixed;inset:0;background:rgba(17,24,39,.72);display:none;place-items:center;padding:14px;z-index:120}.modal.show{display:grid}.modal-card{width:min(430px,100%);background:#fff;border-radius:20px;padding:18px}.field{margin:10px 0}.field label{display:block;font-weight:800;font-size:13px;margin-bottom:6px}.field input,.field select{width:100%;border:1px solid var(--line);border-radius:11px;padding:11px;background:#fff}
 .loader{position:fixed;inset:0;background:rgba(255,255,255,.75);display:none;place-items:center;z-index:150}.loader.show{display:grid}.spinner{width:42px;height:42px;border-radius:50%;border:5px solid #d1d5db;border-top-color:#374151;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .small{font-size:11px;color:var(--muted)}.queue{font-weight:900;color:#b45309}
@@ -32,7 +32,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.4</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.5</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -160,7 +160,7 @@ const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
   stream:null,models:false,employees:[],
   scanning:false,paused:false,lastNoFaceAt:0,serverEpoch:0,serverPerf:0,
-  cooldown:{},queueSyncing:false,branch:null,preparing:false,reconciling:false,lastReconciledAt:0
+  cooldown:{},queueSyncing:false,queueSyncRequested:false,successTimer:null,branch:null,preparing:false,reconciling:false,lastReconciledAt:0
 };
 
 function backendUrl(){return String(window.KL_BACKEND_URL||'').trim()}
@@ -662,23 +662,41 @@ async function punch(user,proof){
     showSuccess(user,type,t,true,'เข้าคิวบันทึกแล้ว');
     updateDeviceInfo();
 
-    if(navigator.onLine)setTimeout(()=>syncQueue(false),0);
+    kickQueueWorker();
   }catch(e){
     showFail(e.message||String(e));
   }
 }
 function setMain(a,b){$('#mainStatus').textContent=a;$('#subStatus').textContent=b||''}
 function showSuccess(user,type,time,queued,mode){
+  // V4.5: เมื่อเข้าคิว local สำเร็จแล้ว ปล่อยกล้องรับคนถัดไปทันที
+  state.paused=false;
+  setMain('พร้อมรับคนต่อไป','รายการก่อนหน้ากำลังส่งเข้า Sheet เบื้องหลัง');
+
+  if(state.successTimer){
+    clearTimeout(state.successTimer);
+    state.successTimer=null;
+  }
+
+  $('#result').classList.add('toast');
   $('#resultIcon').textContent='✓';
   $('#resultName').textContent=user.name||user.userId;
   $('#resultAction').textContent=type==='in'?'เข้างาน IN':'ออกงาน OUT';
   $('#resultAction').className=type==='in'?'result-in':'result-out';
   $('#resultTime').textContent=time||'--:--:--';
-  $('#resultExtra').textContent=(user.department||'')+(queued?' · เข้าคิวบันทึกแล้ว':' · บันทึกแล้ว')+(mode?' · '+mode:'');
+  $('#resultExtra').textContent=(user.department||'')+(queued?' · เข้าคิวแล้ว':' · บันทึกแล้ว');
   $('#result').classList.add('show');
-  setTimeout(()=>{$('#result').classList.remove('show');state.paused=false;setMain('พร้อมรับคนต่อไป','เดินเข้ากรอบทีละ 1 คน')},900);
+
+  // Toast แสดงเพื่อให้พนักงานเห็นผล แต่ไม่หยุดการสแกนใบหน้าคนถัดไป
+  state.successTimer=setTimeout(()=>{
+    $('#result').classList.remove('show','toast');
+    state.successTimer=null;
+  },650);
 }
 function showFail(msg){
+  if(state.successTimer){clearTimeout(state.successTimer);state.successTimer=null}
+  $('#result').classList.remove('toast');
+  state.paused=true;
   $('#resultIcon').textContent='✕';
   $('#resultName').textContent='ไม่บันทึกเวลา';
   $('#resultAction').textContent=msg;
@@ -758,7 +776,7 @@ async function recoverLegacyGpsFailures(){
     await queuePut(ev);
     changed++;
   }
-  if(changed&&navigator.onLine)setTimeout(()=>syncQueue(false),0);
+  if(changed)kickQueueWorker();
   return changed;
 }
 async function openQueueProblems(){
@@ -799,7 +817,7 @@ async function retryQueueProblems(){
     }
     closeQueueProblems();
     updateDeviceInfo();
-    if(navigator.onLine)setTimeout(()=>syncQueue(false),0);
+    kickQueueWorker();
   }finally{
     b.disabled=false;
     b.textContent='ลองส่งรายการที่มีปัญหาอีกครั้ง';
@@ -1074,55 +1092,92 @@ async function prepareDevice(){
     loader(false);
   }
 }
+function kickQueueWorker(){
+  if(!navigator.onLine)return;
+  if(state.queueSyncing){
+    // มีรายการใหม่เข้ามาระหว่างกำลังส่ง: worker จะวนมาเก็บต่อ
+    state.queueSyncRequested=true;
+    return;
+  }
+  setTimeout(()=>syncQueue(false),0);
+}
+
 async function syncQueue(show){
-  if(state.queueSyncing||!navigator.onLine)return;
+  if(!navigator.onLine)return;
+
+  if(state.queueSyncing){
+    state.queueSyncRequested=true;
+    return;
+  }
+
   state.queueSyncing=true;
-  let ok=0;
+  state.queueSyncRequested=false;
+
+  let ok=0,shouldStop=false;
+
   try{
-    const rows=(await queueAll())
-      .filter(x=>x.fastKiosk&&!x.failed)
-      .sort((a,b)=>new Date(a.lockedAt||0)-new Date(b.lockedAt||0));
+    // Drain Queue ต่อเนื่อง:
+    // ระหว่างที่กำลังส่ง ถ้ามีพนักงานคนใหม่สแกนเข้ามา รายการใหม่จะถูกเก็บใน IndexedDB
+    // แล้วรอบ while ถัดไปจะหยิบไปส่งต่อทันที
+    while(navigator.onLine&&!shouldStop){
+      const rows=(await queueAll())
+        .filter(x=>x.fastKiosk&&!x.failed)
+        .sort((a,b)=>new Date(a.lockedAt||0)-new Date(b.lockedAt||0));
 
-    for(const ev of rows){
-      try{
-        const fn=ev.fallbackPin?'syncFallbackPinOffline':'syncKioskOffline';
-        const r=show?await api(fn,ev):await apiSilent(fn,ev);
+      if(!rows.length)break;
 
-        if(r.home)saveHome(ev.userId,r.home,'server');
-        await queueDelete(ev.eventId);
-        ok++;
-      }catch(e){
-        const m=String(e.message||'');
+      state.queueSyncRequested=false;
 
-        if(m.includes('Server ตอบกลับช้า')||m.includes('OFFLINE')){
-          break;
-        }
+      for(const ev of rows){
+        try{
+          const fn=ev.fallbackPin?'syncFallbackPinOffline':'syncKioskOffline';
+          const r=show?await api(fn,ev):await apiSilent(fn,ev);
 
-        if(isAttendanceStateConflict_(m)){
-          await reconcileTodayFromServer().catch(()=>false);
+          if(r.home)saveHome(ev.userId,r.home,'server');
+          await queueDelete(ev.eventId);
+          ok++;
+        }catch(e){
+          const m=String(e.message||'');
 
-          if(await queueEventAlreadyReflected_(ev)){
-            // Sheet already contains the effective state: this local item is redundant.
-            await queueDelete(ev.eventId);
-            ok++;
-            continue;
+          if(m.includes('Server ตอบกลับช้า')||m.includes('OFFLINE')){
+            shouldStop=true;
+            break;
           }
 
-          ev.retryCount=Number(ev.retryCount||0)+1;
-          ev.syncError=m;
-          if(ev.retryCount>=3)ev.failed=true;
-          await queuePut(ev);
-          break;
-        }
+          if(isAttendanceStateConflict_(m)){
+            await reconcileTodayFromServer().catch(()=>false);
 
-        ev.failed=true;
-        ev.syncError=m;
-        await queuePut(ev);
+            if(await queueEventAlreadyReflected_(ev)){
+              await queueDelete(ev.eventId);
+              ok++;
+              continue;
+            }
+
+            ev.retryCount=Number(ev.retryCount||0)+1;
+            ev.syncError=m;
+            if(ev.retryCount>=3)ev.failed=true;
+            await queuePut(ev);
+
+            // ให้หยุดรอบนี้ก่อน เพื่อไม่ยิงรายการลำดับหลังข้าม conflict
+            shouldStop=true;
+            break;
+          }
+
+          ev.failed=true;
+          ev.syncError=m;
+          await queuePut(ev);
+          // รายการเสียถูกแยก failed แล้ว รายการถัดไปยังส่งต่อได้
+        }
       }
+
+      // ถ้ามีรายการใหม่ถูก queue ระหว่าง network request
+      // while จะอ่าน IndexedDB ใหม่และส่งต่อทันที
     }
 
-    // Final lightweight reconciliation keeps LocalStorage equal to Sheet + pending queue.
-    if(ok)await reconcileTodayFromServer().catch(()=>false);
+    // ไม่ขวาง scanner: reconcile หลัง worker จบแบบ background
+    if(ok&&navigator.onLine){
+      setTimeout(()=>reconcileTodayFromServer().catch(()=>false),0);
+    }
 
     if(show){
       const all=await queueAll();
@@ -1135,13 +1190,19 @@ async function syncQueue(show){
   }finally{
     state.queueSyncing=false;
     updateDeviceInfo();
+
+    // ถ้าระหว่างปิด worker มีรายการใหม่เข้ามาพอดี ให้เริ่มต่อทันที
+    if(navigator.onLine&&state.queueSyncRequested){
+      state.queueSyncRequested=false;
+      setTimeout(()=>syncQueue(false),0);
+    }
   }
 }
 function updateNet(){
   $('#net').textContent=navigator.onLine?'● ออนไลน์':'● ออฟไลน์';
   $('#net').className='pill '+(navigator.onLine?'':'off');
 }
-window.addEventListener('online',()=>{updateNet();syncClock();reconcileTodayFromServer().catch(()=>false);syncQueue(false)});
+window.addEventListener('online',()=>{updateNet();syncClock();reconcileTodayFromServer().catch(()=>false);kickQueueWorker()});
 window.addEventListener('offline',updateNet);
 
 async function boot(){
@@ -1190,10 +1251,10 @@ async function boot(){
   }
 
   await recoverLegacyGpsFailures().catch(()=>0);
-  syncQueue(false);
+  kickQueueWorker();
 
-  // Queue sync stays fast; authoritative status refresh is a separate light heartbeat.
-  setInterval(()=>{if(navigator.onLine)syncQueue(false)},15000);
+  // Worker วิ่งทันทีเมื่อมีรายการใหม่; 15 วินาทีเป็น safety heartbeat เท่านั้น
+  setInterval(()=>{if(navigator.onLine)kickQueueWorker()},15000);
   setInterval(()=>{if(navigator.onLine)reconcileTodayFromServer().catch(()=>false)},60000);
 
   scanLoop();
