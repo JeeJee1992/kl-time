@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<title>KL TIME · บัญชีและเงินเดือน · V3.7</title>
+<title>KL TIME · บัญชีและเงินเดือน · V4.2</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--dark2:#374151;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 8px 25px rgba(17,24,39,.08)}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}.muted{color:var(--muted)}.red-t{color:var(--red)}.green-t{color:var(--green)}.amber-t{color:var(--amber)}
@@ -81,25 +81,58 @@
 <script>
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-const state={token:localStorage.getItem('kl_admin_token')||'',user:null,settings:null,tab:'dashboard',adminDate:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}),month:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}).slice(0,7),personalMonth:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}).slice(0,7),personalUserId:'',payPeriod:'1',payMonth:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}).slice(0,7),faceModels:false,stream:null,employees:[],branches:[],branchFilter:'ALL',readCache:new Map()};
+const state={token:localStorage.getItem('kl_admin_token')||'',user:null,settings:null,tab:'dashboard',adminDate:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}),month:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}).slice(0,7),personalMonth:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}).slice(0,7),personalUserId:'',payPeriod:'1',payMonth:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}).slice(0,7),faceModels:false,stream:null,employees:[],branches:[],branchFilter:'ALL',readCache:new Map(),liveRefreshTimer:null,liveRefreshBusy:false};
 function backendUrl(){return String(window.KL_BACKEND_URL||'').trim()}function validBackendUrl(u){return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/.test(String(u||''))}
 const rpcPending=new Map();function dec(s){s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0))))}
 window.addEventListener('message',ev=>{try{const h=new URL(ev.origin).hostname;if(!(h==='script.google.com'||h==='script.googleusercontent.com'||h.endsWith('.googleusercontent.com')))return}catch(e){return}const d=ev.data;if(!d||d.type!=='KL_RPC_B64')return;let m;try{m=dec(d.data)}catch(e){return}const p=rpcPending.get(m.id);if(!p)return;clearTimeout(p.timer);p.frame.remove();rpcPending.delete(m.id);if(p.blocking)loader(false);m.ok?p.resolve(m.result):p.reject(new Error(m.error&&m.error.message?m.error.message:'Server error'))});
 const READ_ACTIONS=new Set(['getAdminDashboard','getAdminAttendance','getTimesheetMonth','getPayrollSummary','getPayrollDetail','getEmployeePageData','getEmployees','getDepartments','getBranches','getLeaves','getHolidays','getAuditLog']);
 const READ_CACHE_TTL=120000;
+const READ_CACHE_TTL_BY_ACTION={
+  getAdminDashboard:0,
+  getAdminAttendance:0,
+  getTimesheetMonth:30000,
+  getPayrollSummary:30000,
+  getPayrollDetail:30000,
+  getLeaves:30000,
+  getHolidays:30000,
+  getAuditLog:30000,
+  getEmployeePageData:120000,
+  getEmployees:120000,
+  getDepartments:120000,
+  getBranches:120000
+};
+function readCacheTtl(fn){return Object.prototype.hasOwnProperty.call(READ_CACHE_TTL_BY_ACTION,fn)?READ_CACHE_TTL_BY_ACTION[fn]:READ_CACHE_TTL}
 function readCacheKey(fn,args){return fn+'|'+JSON.stringify(args)}
 function clearReadCache(){state.readCache?.clear()}
+function clearLiveRefresh(){
+  if(state.liveRefreshTimer){clearTimeout(state.liveRefreshTimer);state.liveRefreshTimer=null}
+}
+function scheduleLiveRefresh(tab){
+  clearLiveRefresh();
+  if(!['dashboard','records'].includes(tab))return;
+  state.liveRefreshTimer=setTimeout(async()=>{
+    if(state.tab!==tab||document.hidden||state.liveRefreshBusy){scheduleLiveRefresh(tab);return}
+    state.liveRefreshBusy=true;
+    try{
+      if(tab==='dashboard')await loadDashboard(true);
+      if(tab==='records')await loadRecords(true);
+    }catch(e){}finally{
+      state.liveRefreshBusy=false;
+      if(state.tab===tab)scheduleLiveRefresh(tab);
+    }
+  },8000);
+}
 function seedEmployeeReadCache(){if(!state.token)return;const key=readCacheKey('getEmployeePageData',[state.token,state.branchFilter]);state.readCache.set(key,{at:Date.now(),value:{employees:state.employees||[],departments:state.departments||[],branches:state.branches||[],branchCode:state.branchFilter}})}
 function api(fn,...args){
   if(!navigator.onLine)return Promise.reject(new Error('ต้องเชื่อมอินเทอร์เน็ตเพื่อใช้หลังบ้าน'));
   const url=backendUrl();if(!validBackendUrl(url))return Promise.reject(new Error('ยังไม่ได้ตั้ง Backend URL'));
   const isRead=READ_ACTIONS.has(fn),key=isRead?readCacheKey(fn,args):'';
-  if(isRead){const hit=state.readCache.get(key);if(hit&&Date.now()-hit.at<READ_CACHE_TTL)return Promise.resolve(hit.value)}
+  if(isRead){const ttl=readCacheTtl(fn),hit=state.readCache.get(key);if(ttl>0&&hit&&Date.now()-hit.at<ttl)return Promise.resolve(hit.value)}
   if(!isRead)loader(true);
   return new Promise((resolve,reject)=>{
     const id='rpc_'+Date.now()+'_'+Math.random().toString(36).slice(2),frame=document.createElement('iframe');frame.name='f_'+id;frame.style.display='none';document.body.appendChild(frame);
     const timer=setTimeout(()=>{rpcPending.delete(id);frame.remove();if(!isRead)loader(false);reject(new Error('Server ตอบกลับช้า กรุณาลองใหม่'))},30000);
-    rpcPending.set(id,{resolve:(result)=>{if(isRead)state.readCache.set(key,{at:Date.now(),value:result});else clearReadCache();resolve(result)},reject,timer,frame,blocking:!isRead});
+    rpcPending.set(id,{resolve:(result)=>{if(isRead&&readCacheTtl(fn)>0)state.readCache.set(key,{at:Date.now(),value:result});else if(!isRead)clearReadCache();resolve(result)},reject,timer,frame,blocking:!isRead});
     const form=document.createElement('form');form.method='POST';form.action=url;form.target=frame.name;form.style.display='none';const add=(n,v)=>{const x=document.createElement('textarea');x.name=n;x.value=v;form.appendChild(x)};add('requestId',id);add('payload',JSON.stringify({id,action:fn,args}));document.body.appendChild(form);form.submit();form.remove();
   })
 }
@@ -116,7 +149,7 @@ async function loadBranchesMeta(){try{state.branches=await api('getBranches',sta
 
 function renderLogin(){state.user=null;$('#app').innerHTML=`<div class="login-shell"><div class="login"><div class="brand"><div class="logo">KL</div><div><h1>KL TIME</h1><div class="sub">บัญชี · เวลาเข้างาน · เงินเดือน</div></div></div><div class="notice" style="margin:16px 0">หน้านี้สำหรับ OWNER / ฝ่ายบัญชี<br>หน้าสแกนพนักงานใช้ <b>fast.html</b></div><div class="field"><label>รหัสผู้ใช้</label><input id="uid" autocomplete="username" placeholder="เช่น ACC001"></div><div class="field"><label>PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password"></div><button class="btn full" onclick="login()">เข้าสู่ระบบ</button><a href="./fast.html" style="display:block;text-align:center;margin-top:13px;color:#374151">เปิดหน้าสแกนเข้า–ออก</a></div></div>`}
 async function login(){try{const r=await api('login',$('#uid').value.trim(),$('#pin').value.trim());if(!['owner','accounting'].includes(r.user.role)){try{await api('logout',r.token)}catch(e){}throw new Error('บัญชีนี้ไม่มีสิทธิ์หลังบ้าน')}state.token=r.token;state.user=r.user;state.settings=r.settings;localStorage.setItem('kl_admin_token',r.token);await loadBranchesMeta();renderAdmin()}catch(e){err(e)}}
-async function logout(){try{await api('logout',state.token)}catch(e){}localStorage.removeItem('kl_admin_token');clearReadCache();state.token='';renderLogin()}
+async function logout(){try{await api('logout',state.token)}catch(e){}localStorage.removeItem('kl_admin_token');clearLiveRefresh();clearReadCache();state.token='';renderLogin()}
 function topbar(){return `<div class="top"><div class="top-left"><div class="mini-logo">KL</div><div><div class="top-name">${esc(state.settings?.companyName||'KL TIME')}</div><div class="sub">ระบบบัญชีและเวลาพนักงาน</div></div></div><div class="top-right"><select onchange="changeBranchFilter(this.value)" style="width:auto;min-width:170px">${branchOptions(true,state.branchFilter)}</select><a class="btn secondary scanlink" href="./fast.html">เปิดหน้าสแกน</a><span class="who"><b>${esc(state.user?.name||'')}</b> · ${roleLabel(state.user?.role)}</span><button class="btn secondary" onclick="logout()">ออก</button></div></div>`}
 const menus=[['dashboard','ภาพรวม'],['records','ลงเวลารายวัน'],['timesheet','ตารางเวลารายเดือน'],['personal','ตารางเวลารายบุคคล'],['payroll','เงินเดือน'],['employees','พนักงาน'],['leave','ลา / วันหยุด'],['reports','รายงาน'],['audit','ประวัติแก้ไข'],['settings','ตั้งค่า']];
 function isOwner(){return state.user?.role==='owner'}
@@ -124,6 +157,7 @@ function visibleMenus(){return menus.filter(([k])=>k!=='settings'||isOwner())}
 function navButtons(cls=''){return visibleMenus().map(([k,l])=>`<button class="${state.tab===k?'active':''} ${cls}" onclick="state.tab='${k}';renderAdmin()">${l}</button>`).join('')}
 function renderAdmin(){$('#app').innerHTML=topbar()+`<div class="layout"><aside class="side">${navButtons()}</aside><main class="content"><div class="mobile-nav">${navButtons()}</div><div id="content"><div class="card"><div class="muted">กำลังโหลดข้อมูล...</div></div></div></main></div>`;loadTab()}
 async function loadTab(){try{
+  clearLiveRefresh();
   if(state.tab==='settings'&&!isOwner()){state.tab='dashboard';toast('เมนูตั้งค่าสำหรับเจ้าของระบบเท่านั้น');return renderAdmin()}
   if(state.tab==='dashboard')return loadDashboard();if(state.tab==='records')return loadRecords();if(state.tab==='timesheet')return loadTimesheet();if(state.tab==='personal')return loadPersonalTimesheet();if(state.tab==='payroll')return loadPayroll();if(state.tab==='employees')return loadEmployees();if(state.tab==='leave')return loadLeave();if(state.tab==='reports')return loadReports();if(state.tab==='audit')return loadAudit();if(state.tab==='settings')return loadSettings()
 }catch(e){
@@ -131,10 +165,10 @@ async function loadTab(){try{
   const box=$('#content');
   if(box)box.innerHTML=`<div class="card"><h2>โหลดข้อมูลไม่สำเร็จ</h2><div class="notice warn">${esc(e.message||String(e))}</div><button class="btn secondary" onclick="loadTab()">ลองใหม่</button></div>`;
 }}
-async function loadDashboard(){state.adminDate=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'});const d=await api('getAdminDashboard',state.token,state.adminDate,state.branchFilter);$('#content').innerHTML=`<div class="stats grid"><div class="card stat"><div class="muted">พนักงาน</div><div class="num">${d.stats.total}</div></div><div class="card stat"><div class="muted">เข้างานแล้ว</div><div class="num green-t">${d.stats.checkedIn}</div></div><div class="card stat"><div class="muted">ยังไม่เข้า</div><div class="num red-t">${d.stats.notIn}</div></div><div class="card stat"><div class="muted">มาสาย</div><div class="num amber-t">${d.stats.late}</div></div><div class="card stat"><div class="muted">ออกแล้ว</div><div class="num">${d.stats.checkedOut}</div></div></div><div class="card" style="margin-top:12px"><div class="section-head"><h2>ลงเวลาวันนี้ · ${esc(d.date)}</h2><div class="row"><button class="btn secondary" onclick="state.tab='payroll';renderAdmin()">ไปเงินเดือน</button><button class="btn secondary" onclick="state.tab='timesheet';renderAdmin()">ดูตารางเดือน</button></div></div>${attendanceTable(d.rows,d.date)}</div>`}
+async function loadDashboard(autoRefresh=false){state.adminDate=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'});const d=await api('getAdminDashboard',state.token,state.adminDate,state.branchFilter);$('#content').innerHTML=`<div class="stats grid"><div class="card stat"><div class="muted">พนักงาน</div><div class="num">${d.stats.total}</div></div><div class="card stat"><div class="muted">เข้างานแล้ว</div><div class="num green-t">${d.stats.checkedIn}</div></div><div class="card stat"><div class="muted">ยังไม่เข้า</div><div class="num red-t">${d.stats.notIn}</div></div><div class="card stat"><div class="muted">มาสาย</div><div class="num amber-t">${d.stats.late}</div></div><div class="card stat"><div class="muted">ออกแล้ว</div><div class="num">${d.stats.checkedOut}</div></div></div><div class="card" style="margin-top:12px"><div class="section-head"><div><h2>ลงเวลาวันนี้ · ${esc(d.date)}</h2><div class="sub">อัปเดตอัตโนมัติทุก 8 วินาที</div></div><div class="row"><button class="btn secondary" onclick="state.tab='payroll';renderAdmin()">ไปเงินเดือน</button><button class="btn secondary" onclick="state.tab='timesheet';renderAdmin()">ดูตารางเดือน</button></div></div>${attendanceTable(d.rows,d.date)}</div>`;scheduleLiveRefresh('dashboard')}
 function attendanceTable(rows,date){return `<div class="table-wrap"><table><thead><tr><th>พนักงาน</th><th>สาขา</th><th>ฝ่าย</th><th>เข้า</th><th>ออก</th><th>สาย</th><th>สถานะ</th><th>โหมด</th><th>หลักฐาน</th><th>แก้ไข</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.name)}</b><div class="sub">${esc(r.userId)}</div></td><td>${esc(r.branchName||branchName(r.branchCode))}</td><td>${esc(r.department)}</td><td>${esc(r.checkIn||'--:--')}</td><td>${esc(r.checkOut||'--:--')}</td><td>${r.lateMinutes?`<span class="badge amber">${r.lateMinutes} นาที</span>`:'0'}</td><td><span class="badge ${r.checkIn?'green':'red'}">${esc(r.status)}</span></td><td>${modeBadge(r.inMode,r.outMode)}</td><td>${r.inPhotoId?`<button class="btn secondary small" onclick="viewPhoto('${r.inPhotoId}')">เข้า</button>`:''} ${r.outPhotoId?`<button class="btn secondary small" onclick="viewPhoto('${r.outPhotoId}')">ออก</button>`:''}</td><td><button class="btn secondary small" onclick="editAttendance('${encodeURIComponent(JSON.stringify({userId:r.userId,name:r.name,date,checkIn:r.checkIn,checkOut:r.checkOut}))}')">แก้ไข</button></td></tr>`).join('')}</tbody></table></div>`}
 function modeBadge(a,b){const s=[a,b].filter(Boolean).join(' / ');if(!s)return '-';if(s.includes('fallback'))return '<span class="badge amber">PIN สำรอง</span>';if(s.includes('offline'))return '<span class="badge blue">ออฟไลน์</span>';if(s.includes('fast'))return '<span class="badge green">Fast Face</span>';return esc(s)}
-async function loadRecords(){const d=await api('getAdminAttendance',state.token,state.adminDate,state.branchFilter);$('#content').innerHTML=`<div class="card"><div class="section-head"><h2>รายการลงเวลารายวัน</h2><div class="row no-print"><input id="dayPick" type="date" value="${esc(state.adminDate)}" style="width:auto"><button class="btn" onclick="state.adminDate=$('#dayPick').value;loadRecords()">ดู</button><button class="btn secondary" onclick="exportAttendanceCsv()">Excel/CSV</button></div></div>${attendanceTable(d.rows,d.date)}</div>`;window.__dayRows=d.rows;window.__dayDate=d.date}
+async function loadRecords(autoRefresh=false){const d=await api('getAdminAttendance',state.token,state.adminDate,state.branchFilter);$('#content').innerHTML=`<div class="card"><div class="section-head"><div><h2>รายการลงเวลารายวัน</h2><div class="sub">อัปเดตอัตโนมัติทุก 8 วินาที</div></div><div class="row no-print"><input id="dayPick" type="date" value="${esc(state.adminDate)}" style="width:auto"><button class="btn" onclick="state.adminDate=$('#dayPick').value;loadRecords()">ดู</button><button class="btn secondary" onclick="exportAttendanceCsv()">Excel/CSV</button></div></div>${attendanceTable(d.rows,d.date)}</div>`;window.__dayRows=d.rows;window.__dayDate=d.date;scheduleLiveRefresh('records')}
 async function viewPhoto(id){try{const src=await api('getEvidencePhoto',state.token,id);modal(`<div class="section-head"><h2>รูปหลักฐาน</h2><button class="btn secondary" onclick="closeModal()">ปิด</button></div><img class="photo" src="${src}">`)}catch(e){err(e)}}
 function editAttendance(enc){const r=JSON.parse(decodeURIComponent(enc));modal(`<div class="section-head"><h2>แก้เวลา · ${esc(r.name)}</h2><button class="btn secondary" onclick="closeModal()">ปิด</button></div><div class="notice warn">ทุกการแก้ไขถูกบันทึกใน Audit Log</div><div class="field"><label>วันที่</label><input id="eDate" value="${esc(r.date)}" disabled></div><div class="settings-grid"><div class="field"><label>เวลาเข้า</label><input id="eIn" type="time" value="${esc(r.checkIn||'')}"></div><div class="field"><label>เวลาออก</label><input id="eOut" type="time" value="${esc(r.checkOut||'')}"></div></div><div class="field"><label>เหตุผล</label><textarea id="eReason" rows="3"></textarea></div><button class="btn full" onclick="saveEdit('${esc(r.userId)}')">บันทึก</button>`,true)}
 async function saveEdit(uid){try{await api('adminEditAttendance',state.token,{userId:uid,date:$('#eDate').value,checkIn:$('#eIn').value,checkOut:$('#eOut').value,reason:$('#eReason').value});closeModal();toast('บันทึกแล้ว');loadRecords()}catch(e){err(e)}}
