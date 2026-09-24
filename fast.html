@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V3.9</title>
+<title>KL TIME FAST KIOSK · V4.0</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -32,7 +32,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V3.9</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.0</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -417,17 +417,59 @@ async function capturePhoto(){
   c.getContext('2d').drawImage(v,0,0,c.width,c.height);
   return c.toDataURL('image/jpeg',.58);
 }
-function inferOfflineType(uid){
+function bangkokDateKey(iso){
+  const d=iso?new Date(iso):new Date();
+  return d.toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'});
+}
+function inferOfflineType(uid,dateKey){
+  dateKey=dateKey||bangkokDateKey();
   const h=getHome(uid);
-  if(!h||!h.checkIn)return 'in';
+  if(!h||String(h.date||'')!==dateKey||!h.checkIn)return 'in';
   if(!h.checkOut)return 'out';
   return 'done';
 }
-function applyLocalHome(uid,type,time){
-  let h=getHome(uid)||{checkIn:'',checkOut:'',status:'ยังไม่ลงเวลา'};
+function applyLocalHome(uid,type,time,dateKey){
+  dateKey=dateKey||bangkokDateKey();
+  let h=getHome(uid);
+  if(!h||String(h.date||'')!==dateKey){
+    h={date:dateKey,checkIn:'',checkOut:'',status:'ยังไม่ลงเวลา'};
+  }
+  h.date=dateKey;
   if(type==='in'){h.checkIn=time;h.status='รอซิงก์ · เข้างาน'}
   if(type==='out'){h.checkOut=time;h.status='รอซิงก์ · ออกงาน'}
   saveHome(uid,h);
+}
+function distanceMetersLocal_(lat1,lng1,lat2,lng2){
+  const R=6371000,toRad=x=>Number(x)*Math.PI/180;
+  const a1=toRad(lat1),a2=toRad(lat2),
+        da=toRad(Number(lat2)-Number(lat1)),
+        dl=toRad(Number(lng2)-Number(lng1));
+  const a=Math.sin(da/2)**2+Math.cos(a1)*Math.cos(a2)*Math.sin(dl/2)**2;
+  return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function localBranchAreaCheck(){
+  const b=state.branch;
+  if(!b)return {ok:false,message:'เครื่องยังไม่ได้ผูกสาขา กรุณาเตรียมเครื่องใหม่'};
+  if(b.lat===''||b.lat==null||b.lng===''||b.lng==null){
+    return {ok:false,message:'สาขา '+(b.name||b.code||'')+' ยังไม่ได้ตั้งพิกัด GPS'};
+  }
+  const lat=Number(b.lat),lng=Number(b.lng),radius=Number(b.radiusM||100);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng)){
+    return {ok:false,message:'พิกัดสาขาไม่ถูกต้อง กรุณาให้ OWNER ตรวจการตั้งค่าสาขา'};
+  }
+  const distance=distanceMetersLocal_(state.gps.lat,state.gps.lng,lat,lng);
+  if(distance>radius){
+    return {
+      ok:false,
+      distance:distance,
+      radius:radius,
+      message:'อยู่นอกพื้นที่ '+(b.name||b.code||'')+
+        ' ระยะประมาณ '+Math.round(distance)+' เมตร (อนุญาต '+radius+
+        ' เมตร) · GPS เครื่องแม่นประมาณ '+Math.round(Number(state.gps.accuracy||0))+
+        ' เมตร · กรุณาตรวจพิกัดสาขา'
+    };
+  }
+  return {ok:true,distance:distance,radius:radius};
 }
 
 async function punch(user,proof){
@@ -437,53 +479,69 @@ async function punch(user,proof){
 
   const cred=creds()[uid];
   if(!cred){showFail('เครื่องยังไม่มีสิทธิ์ของ '+user.name);return}
-  if(new Date(cred.expiresAt).getTime()<Date.now()){showFail('สิทธิ์ Fast Kiosk หมดอายุ กรุณาเตรียมเครื่องใหม่');return}
+  if(new Date(cred.expiresAt).getTime()<Date.now()){
+    showFail('สิทธิ์ Fast Kiosk หมดอายุ กรุณาเตรียมเครื่องใหม่');
+    return;
+  }
 
-  const lock=lockedIso(),eventId=makeEventId(),photo=await capturePhoto();
-  const ev={
-    kiosk:true,fastKiosk:true,eventId,userId:uid,type:'',lockedAt:lock,
-    localDate:new Date(lock).toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'}),
-    lat:state.gps.lat,lng:state.gps.lng,accuracy:state.gps.accuracy,
-    photoDataUrl:photo,faceProof:proof,device:navigator.userAgent,
-    deviceId:deviceId(),permit:cred.permit,branchCode:state.branch?.code||'',createdAt:new Date().toISOString(),failed:false
-  };
+  // ตรวจรัศมีที่เครื่องทันที ไม่ต้องรอ Apps Script
+  const area=localBranchAreaCheck();
+  if(!area.ok){
+    showFail(area.message);
+    return;
+  }
+
+  const lock=lockedIso(),
+        localDate=bangkokDateKey(lock),
+        type=inferOfflineType(uid,localDate);
+
+  if(type==='done'){
+    showFail('วันนี้ลงเวลาเข้าและออกครบแล้ว');
+    return;
+  }
 
   state.paused=true;
   try{
-    if(navigator.onLine){
-      try{
-        const r=await api('fastKioskPunch',ev);
-        if(r.home)saveHome(uid,r.home);
-        state.cooldown[uid]=Date.now()+30000;
-        showSuccess(r.user||user,r.type,r.lockedTime,false);
-        return;
-      }catch(e){
-        const m=String(e.message||'');
-        if(!m.includes('Server ตอบกลับช้า')&&!m.includes('OFFLINE'))throw e;
-      }
-    }
+    const eventId=makeEventId(),
+          photo=await capturePhoto(),
+          t=new Date(lock).toLocaleTimeString('th-TH',{
+            hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+          });
 
-    const type=inferOfflineType(uid);
-    if(type==='done')throw new Error('วันนี้ลงเวลาเข้าและออกครบแล้ว');
-    ev.type=type;
+    const ev={
+      kiosk:true,fastKiosk:true,eventId,userId:uid,type:type,lockedAt:lock,
+      localDate:localDate,
+      lat:state.gps.lat,lng:state.gps.lng,accuracy:state.gps.accuracy,
+      photoDataUrl:photo,faceProof:proof,device:navigator.userAgent,
+      deviceId:deviceId(),permit:cred.permit,
+      branchCode:state.branch?.code||'',
+      createdAt:new Date().toISOString(),failed:false
+    };
+
+    // QUEUE FIRST: บันทึกลงเครื่องก่อน แล้วปล่อยพนักงานคนถัดไปทันที
     await queuePut(ev);
-    const t=new Date(lock).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-    applyLocalHome(uid,type,t);
+    applyLocalHome(uid,type,t,localDate);
     state.cooldown[uid]=Date.now()+30000;
-    showSuccess(user,type,t,true);
+
+    showSuccess(user,type,t,true,'เข้าคิวบันทึกแล้ว');
+    updateDeviceInfo();
+
+    // ซิงก์ Google Sheet เบื้องหลัง ไม่บังหน้าสแกนและไม่ให้พนักงานรอ
+    if(navigator.onLine){
+      setTimeout(()=>syncQueue(false),0);
+    }
   }catch(e){
     showFail(e.message||String(e));
   }
 }
-
 function setMain(a,b){$('#mainStatus').textContent=a;$('#subStatus').textContent=b||''}
-function showSuccess(user,type,time,offline,mode){
+function showSuccess(user,type,time,queued,mode){
   $('#resultIcon').textContent='✓';
   $('#resultName').textContent=user.name||user.userId;
   $('#resultAction').textContent=type==='in'?'เข้างาน IN':'ออกงาน OUT';
   $('#resultAction').className=type==='in'?'result-in':'result-out';
   $('#resultTime').textContent=time||'--:--:--';
-  $('#resultExtra').textContent=(user.department||'')+(offline?' · ออฟไลน์ / รอซิงก์':' · บันทึกแล้ว')+(mode?' · '+mode:'');
+  $('#resultExtra').textContent=(user.department||'')+(queued?' · เข้าคิวบันทึกแล้ว':' · บันทึกแล้ว')+(mode?' · '+mode:'');
   $('#result').classList.add('show');
   setTimeout(()=>{$('#result').classList.remove('show');state.paused=false;setMain('พร้อมรับคนต่อไป','เดินเข้ากรอบทีละ 1 คน')},900);
 }
@@ -532,14 +590,25 @@ async function reloadEmployees(){
   updateDeviceInfo();
 }
 function updateDeviceInfo(){
-  const qPromise=queueAll().then(x=>x.filter(r=>r.kiosk&&!r.failed).length).catch(()=>0);
-  qPromise.then(q=>{
+  queueAll().then(all=>{
+    const q=all.filter(r=>r.kiosk&&!r.failed).length;
+    const failed=all.filter(r=>r.kiosk&&r.failed).length;
     const validCreds=Object.values(creds()).filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now());
-    const exp=validCreds[0]&&validCreds[0].expiresAt?new Date(validCreds[0].expiresAt).toLocaleString('th-TH'):'-';
-    $('#deviceInfo').innerHTML=`สาขา <b>${esc(state.branch?.name||'ยังไม่กำหนด')}</b> · เครื่อง <b>${esc(deviceId().slice(-10))}</b> · Face <b>${state.employees.length}</b> คน · PIN สำรอง <b>${validCreds.length}</b> คน · รอซิงก์ <span class="queue">${q}</span><br><span class="small">สิทธิ์เครื่องหมดอายุ: ${esc(exp)}</span>`;
-  })
-}
+    const exp=validCreds[0]&&validCreds[0].expiresAt
+      ? new Date(validCreds[0].expiresAt).toLocaleString('th-TH')
+      : '-';
 
+    $('#deviceInfo').innerHTML=
+      `สาขา <b>${esc(state.branch?.name||'ยังไม่กำหนด')}</b> · `+
+      `รัศมี <b>${esc(state.branch?.radiusM||'-')} ม.</b> · `+
+      `เครื่อง <b>${esc(deviceId().slice(-10))}</b> · `+
+      `Face <b>${state.employees.length}</b> คน · `+
+      `PIN สำรอง <b>${validCreds.length}</b> คน · `+
+      `รอซิงก์ <span class="queue">${q}</span>`+
+      (failed?` · <span class="red">มีปัญหา ${failed}</span>`:'')+
+      `<br><span class="small">สิทธิ์เครื่องหมดอายุ: ${esc(exp)}</span>`;
+  }).catch(()=>{});
+}
 
 function openFallback(){
   state.paused=true;
@@ -797,20 +866,36 @@ async function syncQueue(show){
     const rows=(await queueAll()).filter(x=>x.fastKiosk&&!x.failed);
     for(const ev of rows){
       try{
-        const r=await api(ev.fallbackPin?'syncFallbackPinOffline':'syncKioskOffline',ev);
+        const fn=ev.fallbackPin?'syncFallbackPinOffline':'syncKioskOffline';
+        const r=show?await api(fn,ev):await apiSilent(fn,ev);
         if(r.home)saveHome(ev.userId,r.home);
-        await queueDelete(ev.eventId);ok++;
+        await queueDelete(ev.eventId);
+        ok++;
       }catch(e){
         const m=String(e.message||'');
-        if(m.includes('Server ตอบกลับช้า'))break;
-        ev.failed=true;ev.syncError=m;await queuePut(ev);
+        if(m.includes('Server ตอบกลับช้า')||m.includes('OFFLINE')){
+          break;
+        }
+        // Error ถาวร: เก็บไว้ให้ตรวจสอบย้อนหลัง แต่ไม่วนยิงซ้ำไม่จบ
+        ev.failed=true;
+        ev.syncError=m;
+        await queuePut(ev);
       }
     }
-    if(show)alert(ok?'ซิงก์สำเร็จ '+ok+' รายการ':'ไม่มีรายการที่ซิงก์ได้');
-    updateDeviceInfo();
-  }finally{state.queueSyncing=false}
-}
 
+    if(show){
+      const all=await queueAll();
+      const pending=all.filter(x=>x.fastKiosk&&!x.failed).length;
+      const failed=all.filter(x=>x.fastKiosk&&x.failed).length;
+      alert(ok
+        ? 'ซิงก์สำเร็จ '+ok+' รายการ · ค้าง '+pending+' · มีปัญหา '+failed
+        : 'ยังไม่มีรายการที่ซิงก์สำเร็จ · ค้าง '+pending+' · มีปัญหา '+failed);
+    }
+  }finally{
+    state.queueSyncing=false;
+    updateDeviceInfo();
+  }
+}
 function updateNet(){
   $('#net').textContent=navigator.onLine?'● ออนไลน์':'● ออฟไลน์';
   $('#net').className='pill '+(navigator.onLine?'':'off');
@@ -844,6 +929,7 @@ async function boot(){
     else setMain('Face ยังไม่พร้อม','ใช้ปุ่ม “ใช้รหัสสำรอง” ได้');
   }
   syncQueue(false);
+  setInterval(()=>{if(navigator.onLine)syncQueue(false)},15000);
   scanLoop();
 }
 boot();
