@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V4.3</title>
+<title>KL TIME FAST KIOSK · V4.4</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -32,7 +32,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.3</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.4</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -145,6 +145,17 @@ const FACE_ASSETS=[
   FACE_MODEL_BASE+'/face_recognition_model-shard2'
 ];
 const FAST_PASS=.50, CONFIRM_MAX=.60, CONFIRM_AVG=.55, SECOND_MARGIN=.06;
+// V4.4 FACE SPEED ONLY:
+// - sample แรกใช้ detector 128 เพื่อให้จับหน้าเร็วขึ้น
+// - sample ยืนยันใช้ 160 เฉพาะกรณีก้ำกึ่ง
+// - threshold การยอมรับใบหน้าเดิมทั้งหมด ไม่เปลี่ยน
+const FACE_FAST_INPUT=128;
+const FACE_CONFIRM_INPUT=160;
+const FACE_CONFIRM_DELAY_MS=70;
+const FACE_LOOP_IDLE_MS=110;
+const FACE_LOOP_BUSY_MS=70;
+const FACE_FAST_OPTIONS=new faceapi.TinyFaceDetectorOptions({inputSize:FACE_FAST_INPUT,scoreThreshold:.48});
+const FACE_CONFIRM_OPTIONS=new faceapi.TinyFaceDetectorOptions({inputSize:FACE_CONFIRM_INPUT,scoreThreshold:.48});
 const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
   stream:null,models:false,employees:[],
@@ -387,35 +398,79 @@ function bestMatch(desc){
   list.sort((a,b)=>a.distance-b.distance);
   return {best:list[0]||null,second:list[1]||null};
 }
-async function detectOne(){
-  const opt=new faceapi.TinyFaceDetectorOptions({inputSize:160,scoreThreshold:.48});
-  const all=await faceapi.detectAllFaces($('#cam'),opt).withFaceLandmarks().withFaceDescriptors();
+async function detectOne(options){
+  const all=await faceapi
+    .detectAllFaces($('#cam'),options||FACE_FAST_OPTIONS)
+    .withFaceLandmarks()
+    .withFaceDescriptors();
+
   if(all.length!==1)return {count:all.length};
+
   const d=all[0].descriptor,b=all[0].detection.box;
   return {count:1,descriptor:Array.from(d),box:b};
 }
+
 async function identify(){
-  const a=await detectOne();
+  // รอบแรก: detector ขนาดเล็กกว่าเดิม เพื่อให้คนส่วนใหญ่ผ่านเร็วที่สุด
+  const a=await detectOne(FACE_FAST_OPTIONS);
   if(a.count!==1)return {ok:false,count:a.count};
+
   const m1=bestMatch(a.descriptor);
   if(!m1.best)return {ok:false,count:1};
+
   const margin=m1.second?m1.second.distance-m1.best.distance:1;
 
+  // ใบหน้าชัดเจน: ผ่านจาก sample แรกทันที
   if(m1.best.distance<=FAST_PASS && margin>=SECOND_MARGIN){
-    return {ok:true,user:m1.best.user,proof:{mode:'fast',descriptor:a.descriptor,liveness:'fast',clientDistance:m1.best.distance,templateVersion:m1.best.user.version}};
+    return {
+      ok:true,
+      user:m1.best.user,
+      proof:{
+        mode:'fast',
+        descriptor:a.descriptor,
+        liveness:'fast',
+        clientDistance:m1.best.distance,
+        templateVersion:m1.best.user.version
+      }
+    };
   }
+
+  // ต่างจาก template มากเกินช่วง confirm: ไม่เสียเวลาตรวจซ้ำ
   if(m1.best.distance>CONFIRM_MAX)return {ok:false,reject:true};
 
-  await new Promise(r=>setTimeout(r,180));
-  const b=await detectOne();
+  // เฉพาะใบหน้าก้ำกึ่งจึงตรวจครั้งที่ 2 ด้วย detector เดิมที่ละเอียดกว่า
+  await new Promise(r=>setTimeout(r,FACE_CONFIRM_DELAY_MS));
+
+  const b=await detectOne(FACE_CONFIRM_OPTIONS);
   if(b.count!==1)return {ok:false,count:b.count};
+
   const m2=bestMatch(b.descriptor);
-  if(!m2.best || m2.best.user.userId!==m1.best.user.userId)return {ok:false,reject:true};
+  if(!m2.best || m2.best.user.userId!==m1.best.user.userId){
+    return {ok:false,reject:true};
+  }
 
   const avg=(m1.best.distance+m2.best.distance)/2;
-  if(m1.best.distance>CONFIRM_MAX||m2.best.distance>CONFIRM_MAX||avg>CONFIRM_AVG)return {ok:false,reject:true};
+  if(
+    m1.best.distance>CONFIRM_MAX ||
+    m2.best.distance>CONFIRM_MAX ||
+    avg>CONFIRM_AVG
+  ){
+    return {ok:false,reject:true};
+  }
 
-  return {ok:true,user:m1.best.user,proof:{mode:'confirm',descriptor:a.descriptor,descriptor2:b.descriptor,liveness:'quick-confirm',clientDistance:Math.max(m1.best.distance,m2.best.distance),clientAverage:avg,templateVersion:m1.best.user.version}};
+  return {
+    ok:true,
+    user:m1.best.user,
+    proof:{
+      mode:'confirm',
+      descriptor:a.descriptor,
+      descriptor2:b.descriptor,
+      liveness:'quick-confirm',
+      clientDistance:Math.max(m1.best.distance,m2.best.distance),
+      clientAverage:avg,
+      templateVersion:m1.best.user.version
+    }
+  };
 }
 
 async function capturePhoto(){
@@ -635,10 +690,17 @@ function showFail(msg){
 }
 
 async function scanLoop(){
-  if(!state.models||!state.stream||state.paused||state.scanning||!state.employees.length){setTimeout(scanLoop,220);return}
+  if(!state.models||!state.stream||state.paused||state.scanning||!state.employees.length){
+    setTimeout(scanLoop,FACE_LOOP_IDLE_MS);
+    return;
+  }
+
   state.scanning=true;
+  let nextDelay=FACE_LOOP_BUSY_MS;
+
   try{
     const r=await identify();
+
     if(r.ok){
       const cd=state.cooldown[r.user.userId]||0;
       if(Date.now()>=cd){
@@ -647,13 +709,21 @@ async function scanLoop(){
       }
     }else if(r.count===0){
       setMain('พร้อมรับคนต่อไป','เดินเข้ากรอบทีละ 1 คน');
+      nextDelay=FACE_LOOP_IDLE_MS;
     }else if(r.count>1){
       setMain('พบมากกว่า 1 ใบหน้า','กรุณาเข้ากรอบทีละ 1 คน');
+      nextDelay=FACE_LOOP_IDLE_MS;
     }else if(r.reject){
       setMain('ไม่พบพนักงานที่ตรงกัน','ไม่บันทึกเวลา');
+      nextDelay=FACE_LOOP_IDLE_MS;
     }
-  }catch(e){setMain('กำลังสแกน','กรุณามองกล้องตรง ๆ')}
-  finally{state.scanning=false;setTimeout(scanLoop,360)}
+  }catch(e){
+    setMain('กำลังสแกน','กรุณามองกล้องตรง ๆ');
+    nextDelay=FACE_LOOP_IDLE_MS;
+  }finally{
+    state.scanning=false;
+    setTimeout(scanLoop,nextDelay);
+  }
 }
 
 async function reloadEmployees(){
