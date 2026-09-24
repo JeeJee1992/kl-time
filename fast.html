@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#374151">
-<title>KL TIME FAST KIOSK · V4.1</title>
+<title>KL TIME FAST KIOSK · V4.2</title>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;--dark:#1f2937;--green:#047857;--red:#b91c1c;--amber:#b45309;--blue:#1d4ed8;--shadow:0 10px 30px rgba(17,24,39,.10)}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai",sans-serif;background:var(--bg);color:var(--text)}
@@ -32,7 +32,7 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
 <body>
 <div class="wrap">
   <div class="head">
-    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.1</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
+    <div class="brand"><div class="logo">KL</div><div><h1>FAST KIOSK <span class="small">V4.2</span></h1><div class="sub">เดินมาหน้ากล้อง → ระบบรู้คน → ลงเวลาอัตโนมัติ</div></div></div>
     <span id="net" class="pill">● ออนไลน์</span>
   </div>
 
@@ -60,7 +60,6 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
     <div class="actions">
       <button class="btn dark" onclick="openPrepare()">เตรียมเครื่อง / อัปเดตพนักงาน</button>
       <button class="btn" onclick="openFallback()">ใช้รหัสสำรอง</button>
-      <button class="btn" onclick="syncQueue(true)">ซิงก์รายการค้าง</button>
       <button class="btn" onclick="location.reload()">รีเฟรช</button>
       <button class="btn red" onclick="location.href='./index.html'">กลับระบบเดิม</button>
     </div>
@@ -102,6 +101,16 @@ h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}.pill{display:
   <div class="field"><label>PIN</label><input id="fallbackPin" type="password" inputmode="numeric" autocomplete="off"></div>
   <div id="fallbackStatus" class="notice">ใช้ PIN สำรองเมื่อสแกนใบหน้าไม่ได้</div>
   <button id="fallbackSubmit" class="btn dark" style="width:100%;margin-top:10px" onclick="submitFallback()">ยืนยันด้วย PIN สำรอง</button>
+</div></div>
+
+<div id="queueProblemModal" class="modal"><div class="modal-card">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b style="font-size:19px">รายการที่มีปัญหา</b>
+    <button class="btn" onclick="closeQueueProblems()">ปิด</button>
+  </div>
+  <div class="notice">รายการใหม่จะเข้าคิวและซิงก์อัตโนมัติ พนักงานไม่ต้องกดปุ่มซิงก์</div>
+  <div id="queueProblemList" style="margin-top:10px"></div>
+  <button id="retryProblemsBtn" class="btn dark" style="width:100%;margin-top:10px" onclick="retryQueueProblems()">ลองส่งรายการที่มีปัญหาอีกครั้ง</button>
 </div></div>
 
 <div id="loader" class="loader">
@@ -536,9 +545,78 @@ async function reloadEmployees(){
   state.employees=arr;
   updateDeviceInfo();
 }
+
+function isLegacyGpsFailure_(msg){
+  const m=String(msg||'').toLowerCase();
+  return m.includes('gps')||
+         m.includes('พิกัด')||
+         m.includes('อยู่นอกพื้นที่')||
+         m.includes('นอกพื้นที่')||
+         m.includes('ระยะประมาณ')||
+         m.includes('accuracy');
+}
+async function recoverLegacyGpsFailures(){
+  const rows=await queueAll().catch(()=>[]);
+  let changed=0;
+  for(const ev of rows){
+    if(!ev.fastKiosk||!ev.failed||!isLegacyGpsFailure_(ev.syncError))continue;
+    ev.failed=false;
+    ev.syncError='';
+    ev.retryRecoveredAt=new Date().toISOString();
+    await queuePut(ev);
+    changed++;
+  }
+  if(changed&&navigator.onLine)setTimeout(()=>syncQueue(false),0);
+  return changed;
+}
+async function openQueueProblems(){
+  const all=await queueAll().catch(()=>[]);
+  const failed=all.filter(x=>x.fastKiosk&&x.failed);
+  const box=$('#queueProblemList');
+
+  if(!failed.length){
+    box.innerHTML='<div class="notice">ไม่มีรายการที่มีปัญหา</div>';
+    $('#retryProblemsBtn').style.display='none';
+  }else{
+    $('#retryProblemsBtn').style.display='block';
+    box.innerHTML=failed.map(x=>{
+      const when=x.lockedAt?new Date(x.lockedAt).toLocaleString('th-TH'):'-';
+      return `<div class="notice warn" style="margin-bottom:8px">
+        <b>${esc(x.userId||'-')}</b> · ${esc(x.type==='out'?'ออกงาน':'เข้างาน')} · ${esc(when)}
+        <div class="small" style="margin-top:4px">${esc(x.syncError||'ไม่ทราบสาเหตุ')}</div>
+      </div>`;
+    }).join('');
+  }
+  $('#queueProblemModal').classList.add('show');
+}
+function closeQueueProblems(){
+  $('#queueProblemModal').classList.remove('show');
+}
+async function retryQueueProblems(){
+  const b=$('#retryProblemsBtn');
+  b.disabled=true;
+  b.textContent='กำลังลองส่งใหม่...';
+  try{
+    const all=await queueAll().catch(()=>[]);
+    for(const ev of all){
+      if(!ev.fastKiosk||!ev.failed)continue;
+      ev.failed=false;
+      ev.syncError='';
+      ev.manualRetryAt=new Date().toISOString();
+      await queuePut(ev);
+    }
+    closeQueueProblems();
+    updateDeviceInfo();
+    if(navigator.onLine)setTimeout(()=>syncQueue(false),0);
+  }finally{
+    b.disabled=false;
+    b.textContent='ลองส่งรายการที่มีปัญหาอีกครั้ง';
+  }
+}
+
 function updateDeviceInfo(){
   queueAll().then(all=>{
-    const q=all.filter(r=>r.kiosk&&!r.failed).length;
+    const pending=all.filter(r=>r.kiosk&&!r.failed).length;
     const failed=all.filter(r=>r.kiosk&&r.failed).length;
     const validCreds=Object.values(creds()).filter(c=>c&&new Date(c.expiresAt).getTime()>Date.now());
     const exp=validCreds[0]&&validCreds[0].expiresAt
@@ -550,9 +628,11 @@ function updateDeviceInfo(){
       `เครื่อง <b>${esc(deviceId().slice(-10))}</b> · `+
       `Face <b>${state.employees.length}</b> คน · `+
       `PIN สำรอง <b>${validCreds.length}</b> คน · `+
-      `รอซิงก์ <span class="queue">${q}</span>`+
-      (failed?` · <span class="red">มีปัญหา ${failed}</span>`:'')+
-      `<br><span class="small">สิทธิ์เครื่องหมดอายุ: ${esc(exp)}</span>`;
+      `รอส่ง <span class="queue">${pending}</span>`+
+      (failed
+        ? ` · <button class="btn red" style="padding:4px 8px;font-size:11px" onclick="openQueueProblems()">มีปัญหา ${failed}</button>`
+        : '')+
+      `<br><span class="small">ระบบส่งรายการเข้า Google Sheet อัตโนมัติ · สิทธิ์เครื่องหมดอายุ: ${esc(exp)}</span>`;
   }).catch(()=>{});
 }
 
@@ -866,6 +946,7 @@ async function boot(){
     if(state.models&&state.stream)setMain('พร้อมรับพนักงาน','เดินเข้ากรอบทีละ 1 คน');
     else setMain('Face ยังไม่พร้อม','ใช้ปุ่ม “ใช้รหัสสำรอง” ได้');
   }
+  await recoverLegacyGpsFailures().catch(()=>0);
   syncQueue(false);
   setInterval(()=>{if(navigator.onLine)syncQueue(false)},15000);
   scanLoop();
