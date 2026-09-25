@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#081525">
-<title>KL TIME FAST KIOSK · V5.0</title>
+<title>KL TIME FAST KIOSK · V5.1</title>
 <style>
 :root{
   --bg:#eef1f5;
@@ -437,7 +437,7 @@ button{touch-action:manipulation}
       <div class="brand">
         <div class="logo">KL</div>
         <div>
-          <h1>KL TIME <span class="small" style="color:#8fa3ba">V5.0</span></h1>
+          <h1>KL TIME <span class="small" style="color:#8fa3ba">V5.1</span></h1>
           <div class="sub">FAST KIOSK · ระบบลงเวลาอัตโนมัติ</div>
         </div>
       </div>
@@ -595,16 +595,21 @@ const FAST_PASS=.50, CONFIRM_MAX=.60, CONFIRM_AVG=.55, SECOND_MARGIN=.06;
 // - threshold การยอมรับใบหน้าเดิมทั้งหมด ไม่เปลี่ยน
 const FACE_FAST_INPUT=128;
 const FACE_CONFIRM_INPUT=160;
-const FACE_CONFIRM_DELAY_MS=70;
-const FACE_LOOP_IDLE_MS=110;
-const FACE_LOOP_BUSY_MS=70;
+const FACE_DEEP_INPUT=192;
+const FACE_CONFIRM_DELAY_MS=55;
+const FACE_LOOP_IDLE_MS=95;
+const FACE_LOOP_BUSY_MS=55;
+const FACE_RETRY_HINT_MS=8000;
+const FACE_PIN_HINT_MS=15000;
 const FACE_FAST_OPTIONS=new faceapi.TinyFaceDetectorOptions({inputSize:FACE_FAST_INPUT,scoreThreshold:.48});
 const FACE_CONFIRM_OPTIONS=new faceapi.TinyFaceDetectorOptions({inputSize:FACE_CONFIRM_INPUT,scoreThreshold:.48});
+const FACE_DEEP_OPTIONS=new faceapi.TinyFaceDetectorOptions({inputSize:FACE_DEEP_INPUT,scoreThreshold:.46});
 const BRANCH_KEY='kl_fast_kiosk_branch_v1';
 let state={
   stream:null,models:false,employees:[],
   scanning:false,paused:false,lastNoFaceAt:0,serverEpoch:0,serverPerf:0,
-  cooldown:{},queueSyncing:false,queueSyncRequested:false,successTimer:null,branch:null,preparing:false,reconciling:false,lastReconciledAt:0,audioUnlocked:false
+  cooldown:{},queueSyncing:false,queueSyncRequested:false,successTimer:null,branch:null,preparing:false,reconciling:false,lastReconciledAt:0,audioUnlocked:false,
+  faceRetryCount:0,faceRetrySince:0
 };
 
 function backendUrl(){return String(window.KL_BACKEND_URL||'').trim()}
@@ -794,6 +799,13 @@ async function loadModels(){
   ]);
   state.models=true;$('#faceStatus').textContent='พร้อม';$('#faceStatus').className='green';
 }
+async function warmupFaceEngine_(){
+  try{
+    const v=$('#cam');
+    if(!state.models||!state.stream||!v||v.readyState<2)return;
+    await faceapi.detectAllFaces(v,FACE_FAST_OPTIONS).withFaceLandmarks().withFaceDescriptors();
+  }catch(e){}
+}
 async function cacheFaceAssets(){
   // V3.8 SPEED: ถ้าโมเดลพร้อมแล้ว ไม่ดาวน์โหลดไฟล์โมเดลซ้ำ
   if(state.models)return;
@@ -854,23 +866,26 @@ async function detectOne(options){
   return {count:1,descriptor:Array.from(d),box:b};
 }
 
-async function identify(){
-  // รอบแรก: detector ขนาดเล็กกว่าเดิม เพื่อให้คนส่วนใหญ่ผ่านเร็วที่สุด
-  const a=await detectOne(FACE_FAST_OPTIONS);
+async function identify(retryCount=0){
+  // รอบปกติใช้ 128 เพื่อความเร็ว
+  // ถ้าตรวจซ้ำหลายรอบค่อยขยับเป็น 160/192 โดยไม่ลด threshold การยอมรับ
+  const primaryOptions=retryCount>=3?FACE_CONFIRM_OPTIONS:FACE_FAST_OPTIONS;
+  const a=await detectOne(primaryOptions);
+
   if(a.count!==1)return {ok:false,count:a.count};
 
   const m1=bestMatch(a.descriptor);
-  if(!m1.best)return {ok:false,count:1};
+  if(!m1.best)return {ok:false,count:1,retry:true};
 
-  const margin=m1.second?m1.second.distance-m1.best.distance:1;
+  const margin1=m1.second?m1.second.distance-m1.best.distance:1;
 
-  // ใบหน้าชัดเจน: ผ่านจาก sample แรกทันที
-  if(m1.best.distance<=FAST_PASS && margin>=SECOND_MARGIN){
+  // หน้าชัดมาก ผ่านทันที
+  if(m1.best.distance<=FAST_PASS && margin1>=SECOND_MARGIN){
     return {
       ok:true,
       user:m1.best.user,
       proof:{
-        mode:'fast',
+        mode:retryCount?'fast-retry':'fast',
         descriptor:a.descriptor,
         liveness:'fast',
         clientDistance:m1.best.distance,
@@ -879,42 +894,69 @@ async function identify(){
     };
   }
 
-  // ต่างจาก template มากเกินช่วง confirm: ไม่เสียเวลาตรวจซ้ำ
-  if(m1.best.distance>CONFIRM_MAX)return {ok:false,reject:true};
+  // ช่วงก้ำกึ่ง: ตรวจซ้ำด้วย 160
+  if(m1.best.distance<=CONFIRM_MAX){
+    await new Promise(r=>setTimeout(r,FACE_CONFIRM_DELAY_MS));
 
-  // เฉพาะใบหน้าก้ำกึ่งจึงตรวจครั้งที่ 2 ด้วย detector เดิมที่ละเอียดกว่า
-  await new Promise(r=>setTimeout(r,FACE_CONFIRM_DELAY_MS));
+    const b=await detectOne(FACE_CONFIRM_OPTIONS);
+    if(b.count!==1)return {ok:false,count:b.count,retry:true};
 
-  const b=await detectOne(FACE_CONFIRM_OPTIONS);
-  if(b.count!==1)return {ok:false,count:b.count};
-
-  const m2=bestMatch(b.descriptor);
-  if(!m2.best || m2.best.user.userId!==m1.best.user.userId){
-    return {ok:false,reject:true};
-  }
-
-  const avg=(m1.best.distance+m2.best.distance)/2;
-  if(
-    m1.best.distance>CONFIRM_MAX ||
-    m2.best.distance>CONFIRM_MAX ||
-    avg>CONFIRM_AVG
-  ){
-    return {ok:false,reject:true};
-  }
-
-  return {
-    ok:true,
-    user:m1.best.user,
-    proof:{
-      mode:'confirm',
-      descriptor:a.descriptor,
-      descriptor2:b.descriptor,
-      liveness:'quick-confirm',
-      clientDistance:Math.max(m1.best.distance,m2.best.distance),
-      clientAverage:avg,
-      templateVersion:m1.best.user.version
+    const m2=bestMatch(b.descriptor);
+    if(!m2.best || m2.best.user.userId!==m1.best.user.userId){
+      return {ok:false,count:1,retry:true};
     }
-  };
+
+    const avg=(m1.best.distance+m2.best.distance)/2;
+    if(
+      m1.best.distance<=CONFIRM_MAX &&
+      m2.best.distance<=CONFIRM_MAX &&
+      avg<=CONFIRM_AVG
+    ){
+      return {
+        ok:true,
+        user:m1.best.user,
+        proof:{
+          mode:'confirm',
+          descriptor:a.descriptor,
+          descriptor2:b.descriptor,
+          liveness:'quick-confirm',
+          clientDistance:Math.max(m1.best.distance,m2.best.distance),
+          clientAverage:avg,
+          templateVersion:m1.best.user.version
+        }
+      };
+    }
+
+    return {ok:false,count:1,retry:true};
+  }
+
+  // ถ้ายังไม่ตรงและตรวจซ้ำมาหลายรอบ ให้ลอง detector ละเอียด 192
+  // แต่ยังใช้ threshold เดิม ไม่ลดความปลอดภัย
+  if(retryCount>=2){
+    const d=await detectOne(FACE_DEEP_OPTIONS);
+    if(d.count===1){
+      const md=bestMatch(d.descriptor);
+      if(md.best){
+        const marginD=md.second?md.second.distance-md.best.distance:1;
+        if(md.best.distance<=FAST_PASS && marginD>=SECOND_MARGIN){
+          return {
+            ok:true,
+            user:md.best.user,
+            proof:{
+              mode:'deep-retry',
+              descriptor:d.descriptor,
+              liveness:'deep-retry',
+              clientDistance:md.best.distance,
+              templateVersion:md.best.user.version
+            }
+          };
+        }
+      }
+    }
+  }
+
+  // สำคัญ: ไม่ตัดพนักงานทิ้ง ให้ scanLoop ตรวจต่ออัตโนมัติ
+  return {ok:false,count:1,retry:true};
 }
 
 async function capturePhoto(){
@@ -1051,6 +1093,47 @@ async function queueEventAlreadyReflected_(ev){
   if(ev.type==='out')return !!h.checkOut;
   return false;
 }
+async function finalizeQueuedPunch_(ev){
+  try{
+    const photo=await capturePhoto();
+    ev.photoDataUrl=photo||'';
+  }catch(e){
+    ev.photoDataUrl='';
+  }
+
+  ev.pendingPhoto=false;
+  ev.photoFinalizedAt=new Date().toISOString();
+
+  try{
+    await queuePut(ev);
+  }catch(e){}
+
+  updateDeviceInfo();
+  kickQueueWorker();
+}
+
+async function recoverPendingPhotoQueue_(){
+  const rows=await queueAll().catch(()=>[]);
+  let fixed=0;
+  const now=Date.now();
+
+  for(const ev of rows){
+    if(!ev.fastKiosk||!ev.pendingPhoto)continue;
+
+    const age=now-new Date(ev.createdAt||ev.lockedAt||0).getTime();
+    if(age<4000)continue;
+
+    ev.pendingPhoto=false;
+    ev.photoDataUrl=ev.photoDataUrl||'';
+    ev.photoRecoveredAt=new Date().toISOString();
+    await queuePut(ev);
+    fixed++;
+  }
+
+  if(fixed)kickQueueWorker();
+  return fixed;
+}
+
 async function punch(user,proof){
   const uid=user.userId;
   if(state.cooldown[uid]&&Date.now()<state.cooldown[uid])return;
@@ -1062,16 +1145,15 @@ async function punch(user,proof){
     return;
   }
 
-  // Lock the face-scan time immediately. Server checks must never change this timestamp.
+  // ล็อกเวลาทันทีที่ระบบยืนยันใบหน้า
   const lock=lockedIso(),
         localDate=bangkokDateKey(lock);
 
   let type=await resolveAttendanceType_(uid,localDate);
 
-  // A cached "done" state is the only case where we briefly confirm with Sheet.
-  // Normal IN/OUT never waits for Server.
+  // ตรวจ Server เฉพาะกรณีที่จะปฏิเสธว่า "ครบแล้ว" เท่านั้น
   if(type==='done'&&navigator.onLine){
-    setMain('กำลังตรวจสถานะของ '+user.name,'ตรวจข้อมูลจริงจากระบบก่อนปฏิเสธการลงเวลา');
+    setMain('กำลังตรวจสถานะของ '+user.name,'ตรวจข้อมูลจริงก่อนปฏิเสธการลงเวลา');
     await withTimeout(reconcileTodayFromServer(),5000,'ตรวจสถานะนานเกินไป').catch(()=>false);
     type=await resolveAttendanceType_(uid,localDate);
   }
@@ -1081,32 +1163,37 @@ async function punch(user,proof){
     return;
   }
 
-  state.paused=true;
   try{
     const eventId=makeEventId(),
-          photo=await capturePhoto(),
           t=new Date(lock).toLocaleTimeString('th-TH',{
             hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
           });
 
+    // บันทึก record ขั้นต่ำลง IndexedDB ก่อน
+    // เพื่อให้ Popup สำเร็จมีหลักฐานในเครื่องแล้ว โดยไม่รอรูป/Google Sheet
     const ev={
       kiosk:true,fastKiosk:true,eventId,userId:uid,type:type,lockedAt:lock,
       localDate:localDate,
       lat:'',lng:'',accuracy:'',
-      photoDataUrl:photo,faceProof:proof,device:navigator.userAgent,
+      photoDataUrl:'',pendingPhoto:true,
+      faceProof:proof,device:navigator.userAgent,
       deviceId:deviceId(),permit:cred.permit,
       branchCode:state.branch?.code||'',
       createdAt:new Date().toISOString(),failed:false,noGps:true
     };
 
     await queuePut(ev);
+
     applyLocalHome(uid,type,t,localDate);
     state.cooldown[uid]=Date.now()+30000;
 
-    showSuccess(user,type,t,true,'เข้าคิวบันทึกแล้ว');
+    // พนักงานเห็นผลทันทีหลัง record ขั้นต่ำลงเครื่องสำเร็จ
+    showSuccess(user,type,t,true,'บันทึกเวลาแล้ว');
     updateDeviceInfo();
 
-    kickQueueWorker();
+    // รูปหลักฐาน + ส่ง Sheet เป็นงานเบื้องหลัง
+    setTimeout(()=>finalizeQueuedPunch_(ev),0);
+
   }catch(e){
     showFail(e.message||String(e));
   }
@@ -1118,7 +1205,6 @@ function setCameraState(mode,pending=0){
         bar=$('#syncProgress');
   if(!box||!icon||!title||!sub||!bar)return;
 
-  box.className='camera-state '+(mode||'ready');
   bar.style.display='none';
 
   if(mode==='hidden'){
@@ -1126,26 +1212,15 @@ function setCameraState(mode,pending=0){
     return;
   }
 
-  if(mode==='syncing'){
-    icon.textContent='↻';
-    title.textContent='กำลังส่งข้อมูล...';
-    sub.textContent='เหลือ '+Number(pending||0)+' รายการ';
-    bar.style.display='block';
-    return;
-  }
-
+  // Queue/Google Sheet เป็นงานเบื้องหลัง ไม่บังหน้ากล้อง
+  box.className='camera-state ready';
   icon.textContent='◎';
   title.textContent='กรุณามองที่กล้อง';
   sub.textContent='ระบบกำลังตรวจสอบใบหน้า...';
 }
 function restoreCameraState(){
-  queueAll().then(all=>{
-    const pending=all.filter(r=>r.kiosk&&!r.failed).length;
-    setCameraState(pending>0?'syncing':'ready',pending);
-  }).catch(()=>setCameraState('ready',0));
+  setCameraState('ready',0);
 }
-
-
 function isIOSDevice_(){
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
@@ -1220,7 +1295,7 @@ function showSuccess(user,type,time,queued,mode){
   $('#resultName').textContent=(user.name||user.userId)+(user.userId?' · '+user.userId:'');
   $('#resultAction').textContent=type==='in'?'เข้างานแล้ว':'ออกงานแล้ว';
   $('#resultTime').textContent=time||'--:--:--';
-  $('#resultExtra').textContent=queued?'☁ เข้าคิวบันทึกแล้ว':'✓ บันทึกแล้ว';
+  $('#resultExtra').textContent='✓ บันทึกเวลาแล้ว';
 
   // การ์ดเด้งให้เห็นชัด แต่ไม่ pause scanner
   state.successTimer=setTimeout(()=>{
@@ -1244,6 +1319,11 @@ function showFail(msg){
   setTimeout(()=>{$('#result').className='result';state.paused=false;setMain('พร้อมสแกนใหม่','เดินเข้ากรอบทีละ 1 คน');restoreCameraState()},1200);
 }
 
+function resetFaceRetry_(){
+  state.faceRetryCount=0;
+  state.faceRetrySince=0;
+}
+
 async function scanLoop(){
   if(!state.models||!state.stream||state.paused||state.scanning||!state.employees.length){
     setTimeout(scanLoop,FACE_LOOP_IDLE_MS);
@@ -1254,33 +1334,66 @@ async function scanLoop(){
   let nextDelay=FACE_LOOP_BUSY_MS;
 
   try{
-    const r=await identify();
+    const r=await identify(state.faceRetryCount);
 
     if(r.ok){
+      resetFaceRetry_();
+
       const cd=state.cooldown[r.user.userId]||0;
       if(Date.now()>=cd){
         setMain('พบ '+r.user.name,'กำลังล็อกเวลา...');
         await punch(r.user,r.proof);
       }
+
     }else if(r.count===0){
+      resetFaceRetry_();
       setMain('พร้อมรับคนต่อไป','เดินเข้ากรอบทีละ 1 คน');
       nextDelay=FACE_LOOP_IDLE_MS;
+
     }else if(r.count>1){
+      resetFaceRetry_();
       setMain('พบมากกว่า 1 ใบหน้า','กรุณาเข้ากรอบทีละ 1 คน');
       nextDelay=FACE_LOOP_IDLE_MS;
-    }else if(r.reject){
-      setMain('ไม่พบพนักงานที่ตรงกัน','ไม่บันทึกเวลา');
-      nextDelay=FACE_LOOP_IDLE_MS;
+
+    }else{
+      // มีใบหน้า 1 คน แต่ยังไม่มั่นใจว่าเป็นใคร:
+      // ไม่ตัดทิ้ง / ไม่ขึ้น "ไม่บันทึกเวลา" / ตรวจต่ออัตโนมัติ
+      if(!state.faceRetrySince)state.faceRetrySince=Date.now();
+      state.faceRetryCount++;
+
+      const elapsed=Date.now()-state.faceRetrySince;
+
+      if(elapsed>=FACE_PIN_HINT_MS){
+        setMain(
+          'ยังอ่านใบหน้าไม่ชัด · กำลังตรวจต่อ',
+          'มองตรง ขยับเข้าใกล้เล็กน้อย หรือใช้รหัสสำรองได้'
+        );
+      }else if(elapsed>=FACE_RETRY_HINT_MS){
+        setMain(
+          'ยังอ่านใบหน้าไม่ชัด · กำลังตรวจต่อ',
+          'กรุณามองตรงและอยู่ในกรอบ ระบบจะตรวจซ้ำอัตโนมัติ'
+        );
+      }else{
+        setMain(
+          'กำลังตรวจใบหน้า...',
+          'กรุณามองกล้องตรง ๆ ระบบจะตรวจต่ออัตโนมัติ'
+        );
+      }
+
+      nextDelay=FACE_LOOP_BUSY_MS;
     }
+
   }catch(e){
-    setMain('กำลังสแกน','กรุณามองกล้องตรง ๆ');
+    // Error ชั่วคราวก็ไม่หยุด scanner
+    if(!state.faceRetrySince)state.faceRetrySince=Date.now();
+    state.faceRetryCount++;
+    setMain('กำลังตรวจใบหน้า...','กรุณามองกล้องตรง ๆ ระบบจะลองใหม่อัตโนมัติ');
     nextDelay=FACE_LOOP_IDLE_MS;
   }finally{
     state.scanning=false;
     setTimeout(scanLoop,nextDelay);
   }
 }
-
 async function reloadEmployees(){
   const fs=await faceAll(),cs=creds(),arr=[];
   for(const f of fs){
@@ -1378,12 +1491,10 @@ function updateDeviceInfo(){
         : '<span class="queue-dot">●</span>ส่งข้อมูลอัตโนมัติ';
     }
 
-    // แสดงสถานะ “กำลังส่งข้อมูล” จาก Queue จริง
+    // Queue แสดงเฉพาะแถบด้านล่าง ไม่บังหน้ากล้องพนักงาน
     const resultBox=$('#result');
     const successVisible=resultBox&&resultBox.classList.contains('show');
-    if(!successVisible){
-      setCameraState(pending>0?'syncing':'ready',pending);
-    }
+    if(!successVisible)setCameraState('ready',0);
     if(qb){
       qb.style.display=failed?'inline-block':'none';
       qb.textContent='มีปัญหา '+failed;
@@ -1677,7 +1788,7 @@ async function syncQueue(show){
     // แล้วรอบ while ถัดไปจะหยิบไปส่งต่อทันที
     while(navigator.onLine&&!shouldStop){
       const rows=(await queueAll())
-        .filter(x=>x.fastKiosk&&!x.failed)
+        .filter(x=>x.fastKiosk&&!x.failed&&!x.pendingPhoto)
         .sort((a,b)=>new Date(a.lockedAt||0)-new Date(b.lockedAt||0));
 
       if(!rows.length)break;
@@ -1799,7 +1910,10 @@ async function boot(){
     setMain('กล้องมีปัญหา','ยังใช้ “รหัสสำรอง” ได้');
   }
 
-  try{await loadModels()}catch(e){
+  try{
+    await loadModels();
+    await warmupFaceEngine_();
+  }catch(e){
     $('#faceStatus').textContent='ใช้ไม่ได้';$('#faceStatus').className='red';
     setMain('Face มีปัญหา','ยังใช้ “รหัสสำรอง” ได้');
   }
@@ -1818,6 +1932,7 @@ async function boot(){
   }
 
   await recoverLegacyGpsFailures().catch(()=>0);
+  await recoverPendingPhotoQueue_().catch(()=>0);
   kickQueueWorker();
 
   // Worker วิ่งทันทีเมื่อมีรายการใหม่; 15 วินาทีเป็น safety heartbeat เท่านั้น
