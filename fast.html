@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#081525">
-<title>KL TIME FAST KIOSK · V5.1</title>
+<meta name="application-name" content="KL TIME">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KL TIME">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<title>KL TIME FAST KIOSK · V5.2</title>
 <style>
 :root{
   --bg:#eef1f5;
@@ -437,7 +445,7 @@ button{touch-action:manipulation}
       <div class="brand">
         <div class="logo">KL</div>
         <div>
-          <h1>KL TIME <span class="small" style="color:#8fa3ba">V5.1</span></h1>
+          <h1>KL TIME <span class="small" style="color:#8fa3ba">V5.2</span></h1>
           <div class="sub">FAST KIOSK · ระบบลงเวลาอัตโนมัติ</div>
         </div>
       </div>
@@ -510,6 +518,7 @@ button{touch-action:manipulation}
         <div class="actions">
           <button class="btn dark" onclick="openPrepare()">เตรียมเครื่อง / อัปเดตพนักงาน</button>
           <button class="btn" onclick="openFallback()">ใช้รหัสสำรอง</button>
+          <button class="btn" id="installAppBtn" onclick="installKioskApp()">ติดตั้งแอป</button>
           <button class="btn" onclick="location.reload()">รีเฟรช</button>
           <button class="btn red" onclick="location.href='./index.html'">กลับระบบเดิม</button>
         </div>
@@ -557,6 +566,14 @@ button{touch-action:manipulation}
   <button id="retryProblemsBtn" class="btn dark" style="width:100%;margin-top:10px" onclick="retryQueueProblems()">ลองส่งรายการที่มีปัญหาอีกครั้ง</button>
 </div></div>
 
+<div id="installModal" class="modal"><div class="modal-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <b style="font-size:19px">ติดตั้ง KL TIME</b>
+    <button class="btn" onclick="closeInstallModal()">ปิด</button>
+  </div>
+  <div id="installHelp" class="notice" style="margin:12px 0 0"></div>
+</div></div>
+
 <div id="loader" class="loader">
   <div style="display:grid;place-items:center;gap:12px;text-align:center">
     <div class="spinner"></div>
@@ -568,6 +585,77 @@ button{touch-action:manipulation}
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
+
+let deferredInstallPrompt=null;
+
+function isStandaloneMode_(){
+  return window.matchMedia?.('(display-mode: standalone)').matches ||
+         window.navigator.standalone===true;
+}
+
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();
+  deferredInstallPrompt=e;
+  const b=$('#installAppBtn');
+  if(b)b.textContent='ติดตั้งแอป';
+});
+
+window.addEventListener('appinstalled',()=>{
+  deferredInstallPrompt=null;
+  const b=$('#installAppBtn');
+  if(b){b.textContent='ติดตั้งแล้ว';b.disabled=true}
+});
+
+function closeInstallModal(){
+  $('#installModal')?.classList.remove('show');
+}
+
+async function installKioskApp(){
+  if(isStandaloneMode_()){
+    const help=$('#installHelp');
+    if(help)help.innerHTML='<b>ติดตั้งแล้ว</b><br>ตอนนี้ KL TIME เปิดในโหมดแอปอยู่';
+    $('#installModal')?.classList.add('show');
+    return;
+  }
+
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    try{
+      await deferredInstallPrompt.userChoice;
+    }catch(e){}
+    deferredInstallPrompt=null;
+    return;
+  }
+
+  const help=$('#installHelp');
+  if(!help)return;
+
+  if(isIOSDevice_()){
+    help.innerHTML=
+      '<b>iPhone / iPad</b><br>'+
+      '1. เปิดหน้านี้ด้วย Safari<br>'+
+      '2. แตะปุ่ม <b>แชร์</b> ของ Safari<br>'+
+      '3. เลือก <b>เพิ่มไปยังหน้าจอโฮม</b><br>'+
+      '4. แตะ <b>เพิ่ม</b><br><br>'+
+      'จากนั้นเปิดไอคอน <b>KL TIME</b> จากหน้าจอโฮมได้เหมือนแอป';
+  }else{
+    help.innerHTML=
+      '<b>Android</b><br>'+
+      'เปิดเมนูของ Chrome แล้วเลือก <b>ติดตั้งแอป</b> หรือ <b>เพิ่มไปยังหน้าจอหลัก</b>.<br>'+
+      'ถ้ายังไม่เห็นตัวเลือก ให้รีเฟรชหน้านี้หนึ่งครั้งแล้วลองใหม่';
+  }
+  $('#installModal')?.classList.add('show');
+}
+
+async function registerKioskServiceWorker_(){
+  if(!('serviceWorker' in navigator))return;
+  try{
+    await navigator.serviceWorker.register('./sw-fast.js',{scope:'./'});
+  }catch(e){
+    console.warn('PWA service worker registration failed',e);
+  }
+}
+
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 const DEVICE_KEY='kl_kiosk_device_v4';
 const CRED_KEY='kl_kiosk_offline_credentials_branch_v1';
@@ -1873,6 +1961,11 @@ window.addEventListener('online',()=>{updateNet();syncClock();reconcileTodayFrom
 window.addEventListener('offline',updateNet);
 
 async function boot(){
+  registerKioskServiceWorker_();
+  if(isStandaloneMode_()){
+    const ib=$('#installAppBtn');
+    if(ib){ib.textContent='ติดตั้งแล้ว';ib.disabled=true}
+  }
   migrateStatusCacheV43();
   const soundBtn=$('#soundUnlockBtn');
   if(soundBtn){

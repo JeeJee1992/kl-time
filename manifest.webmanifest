@@ -1,21 +1,28 @@
 {
-  "name": "KL TIME - ระบบลงเวลาพนักงาน",
+  "id": "./fast.html",
+  "name": "KL TIME Fast Kiosk",
   "short_name": "KL TIME",
-  "start_url": "./",
+  "description": "ระบบสแกนใบหน้าเข้า-ออกงาน KL TIME",
+  "lang": "th",
+  "start_url": "./fast.html?app=1",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f3f4f6",
-  "theme_color": "#374151",
-  "lang": "th",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait",
+  "background_color": "#081525",
+  "theme_color": "#081525",
   "icons": [
     {
-      "src": "icon-192.png",
+      "src": "./icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "icon-512.png",
+      "src": "./icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
